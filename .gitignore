@@ -1,0 +1,16 @@
+# Organizer material and raw data (never commit)
+dataset/
+context/
+# Large intermediates and outputs
+work/
+output/
+submissions/**/*.tsv
+submissions/**/*.zip
+*.parquet
+*.npy
+*.pkl
+*.zip
+__pycache__/
+*.pyc
+.DS_Store
+__MACOSX/
