@@ -1,9 +1,9 @@
 # Genovate: Amazon ML Challenge 2026, project status
 
 **Team:** Hemanth Raj, Kushal K V, Ayush Khanuja
-**Status as of:** 25 Sep 2026, about 22:30 IST
+**Status as of:** 25 Sep 2026, 22:20 IST
 **Deadline:** 27 Sep 2026, 23:59 IST. Target the final upload by about 20:00 IST on 27 Sep.
-**Best public leaderboard score:** 0.976736 (v03). The current #1 is 0.9859.
+**Best public leaderboard score:** 0.976736 (v03). **v04 has been handed over for upload** (best local score so far). The current #1 is 0.9859.
 
 This document covers what the problem is, what we have built, how well it works, what we have learned, and what is left to do. The detailed working plan is in [PLAN.md](PLAN.md), and every upload is logged in [submissions/SUBMISSIONS.md](submissions/SUBMISSIONS.md).
 
@@ -23,11 +23,11 @@ Scoring is **macro F0.5** computed per S1 entity and then averaged. It weights p
 |---|---|
 | Output is tab-separated with exact headers, one row per test S1 (empty list allowed), only S2/S3 IDs that exist in test, no duplicates | ✅ The writer enforces it, and every upload passes `validate_submission.py --check-ids` |
 | `candidate_pairs.tsv` is the exact set the model scores, and matches ⊆ candidates | ✅ Both files are written from the same pair table, and the writer asserts it |
-| `country` is an open set: no hard-coding, filtering or one-hot of {US, India} | ✅ Country only splits the work into partitions. It is never a model feature, and France goes through the same code |
-| No external data, APIs, geocoding or registries | ✅ The only knowledge sources are hand-written abbreviation lists and maps learned from the provided train pairs. No pretrained models |
+| `country` is an open set: no hard-coding, filtering or one-hot of {US, India} | ✅ Country only splits the work into partitions. It is never a model feature, and France goes through the same code. Learned maps are keyed by whatever labels exist, so an unseen label simply gets none |
+| No external data, APIs, geocoding or registries | ✅ The only knowledge sources are hand-written abbreviation lists, maps learned from the provided train pairs, and unsupervised statistics computed on each split's own files. No pretrained models |
 | The final model is MIT/Apache-2.0 and has at most 8B parameters | ✅ LightGBM (MIT). pyarrow is Apache-2.0; the other libraries are MIT or BSD |
-| At most 5 uploads per day, with a version history kept | ✅ Local git with one tag per upload (`v01`–`v03`), plus the files archived in `submissions/vNN/` |
-| Final zip: `output/`, `code/business_entity_resolution/{src,README.md,requirements.txt}`, `Documentation_template.md` | ⏳ Code, README and requirements exist. The zip and the filled template are still to do (§8) |
+| At most 5 uploads per day, with a version history kept | ✅ Local git with one tag per upload (`v01`–`v04`), plus the files archived in `submissions/vNN/` |
+| Final zip: `output/`, `code/business_entity_resolution/{src,README.md,requirements.txt}`, `Documentation_template.md` | ⏳ Code, README and requirements exist. The zip and the filled template are still to do (§8-C) |
 | Don't publish code during the challenge | ✅ Nothing has been pushed. The GitHub repo is public, so we push after the deadline or once it is private |
 
 ---
@@ -50,33 +50,38 @@ Scoring is **macro F0.5** computed per S1 entity and then averaged. It weights p
   - Indian names written in Indian scripts (18% of Indian records).
   - Addresses: reordered components, truncated house numbers (607→60, 2007→007), added `H.no`/`#`/`No` prefixes, state codes vs full names vs local script, placeholders (N/A, null), PO box/PMB/unit, empty addresses (about 3%).
   - **Near-twin decoys:** the same name and street with a nearby house number, or a similar name at the same address.
+- **France-specific noise** (found in the unlabeled test data):
+  - Departments in place of regions (Gironde / Nouvelle-Aquitaine), `n°5` number prefixes, `st-` vs `saint-`.
+  - The same avenue typos as the US.
+  - Generator-added words: Groupe, Participations, Holding, Distribution, Développement, International, Et Fils, Et Associés.
 
 ---
 
 ## 4. What is built (the pipeline)
 
-Everything is in `code/business_entity_resolution/src/` (17 Python files, about 1,900 lines). `run_all.py` runs everything end to end. The full run takes about 1.5 hours on the laptop: 16 GB RAM, 24 threads, CPU only.
+Everything is in `code/business_entity_resolution/src/` (17 Python files, about 1,950 lines). `run_all.py` runs everything end to end and defaults to the test-like variant. The full run takes about 1.7 hours on the laptop: 16 GB RAM, 24 threads, CPU only.
 
 ```
 raw TSV ──prepare──> parquet ──learn_maps──> maps.json ──normalize──> normalized records
      ──blocking──> top-12 S1 per record ──features──> 62 features per pair
-     ──stage-1 LightGBM (2-fold, out-of-fold)──> p1 ──stage-2 LightGBM (+context from p1)──> p2
-     ──decide (best S1 per record, then expected-F0.5 set per S1)──> output/*.tsv
+     ──stage-1 LightGBM (2-fold, out-of-fold)──> p1
+     ──stage-2 LightGBM (62 features + 29 context/sibling/core features from p1)──> p2
+     ──decide (best S1 per record, then calibrated expected-F0.5 set per S1)──> output/*.tsv
 ```
 
 | Step | File | What it does | Key numbers |
 |---|---|---|---|
 | Prepare | `prepare.py` | TSV → parquet with integer row IDs, plus a table of true pairs | 9 s |
-| Learned maps | `learn_maps.py` | From train pairs only: an Indian-script→Latin word dictionary, and per-country address substitutions (TX↔Texas, MH↔Maharashtra, Bombay→Mumbai, street-type typos) | 1,347 Indian-script words (96% test coverage), 55+76 US and 29+6 India component/token maps |
-| Normalize | `textnorm.py`, `normalize_all.py` | Name: core tokens, strict core, compact form, legal-form set, "doing business as" alternative, flags. Address: tokens, digit runs, house number, unit/PO box. The same rules run for every country, with French abbreviations included | 24M records in about 2 min |
-| Blocking | `blocking.py` | IDF-weighted shared keys (name tokens and bigrams, compact name, 4-character prefixes, address words and bigrams, house numbers plus truncated variants, name×number, name×word, number×word), each type with its own cap. Keeps the top 12 S1 per record | Train: **pair recall 98.45%, oracle F0.5 0.9952**. About 30 min for train plus test |
-| Pruning + features | `features.py` | Keeps candidates scoring at least 0.3× the record's best, which leaves 26.8M train and 31.0M test pairs with only 0.01 points of recall lost. Then computes the features: rapidfuzz ratios, TF-IDF cosines, house-number exact/truncation/edit distance, number sets, legal forms, acronyms, name/address sharing counts, blocking context | 55 features in v0, 62 in v1. About 3 min for train and 9 min for test |
-| Stage 1 | `train.py` | LightGBM with 2 folds grouped by *query cluster* (all records of one entity stay in the same fold), producing out-of-fold probabilities | about 20–25 min |
-| Stage 2 | `stage2.py` | Re-scores each pair using context from the out-of-fold stage-1 scores. Record side: its share, margin and rank among its candidates. Entity side: summed score, number of confident records, competing records | +0.003 local F0.5 |
-| Decision | `decide.py`, `tune.py` | Each record keeps only its best S1. Then either a global threshold τ, or each entity's match set is chosen to **maximize exact expected F0.5** (Poisson-binomial dynamic programming, tested against brute force), with isotonic calibration | chosen automatically on out-of-fold predictions |
-| Output | `output.py`, `predict.py` | Writes both TSVs and asserts every rule | runs the validator after each build |
+| Learned maps | `learn_maps.py` | From train pairs only: an Indian-script→Latin word dictionary, and per-country address substitutions (TX↔Texas, MH↔Maharashtra, Bombay→Mumbai, street-type typos). The street-type typo map is also applied to countries with no map of their own (France) | 1,347 Indian-script words (97.8% train / 96.4% test coverage) |
+| Normalize | `textnorm.py`, `normalize_all.py` | Name: core tokens, strict core (generic words removed, French ones included), compact form, legal-form set, "doing business as" alternative, flags. Address: tokens, digit runs, house number, unit/PO box, `n°` removal, hyphen splitting. The same rules run for every country | 24M records in about 2 min |
+| Blocking | `blocking.py` | IDF-weighted shared keys (name tokens and bigrams, compact name, 4-character prefixes, address words and bigrams, house numbers plus truncated variants, name×number, name×word, number×word), each type with its own cap. Keeps the top 12 S1 per record | Train: **pair recall 98.40%, oracle F0.5 0.9951**. About 30 min for train plus test |
+| Pruning + features | `features.py` | Keeps candidates scoring at least 0.3× the record's best, which leaves 35.7M test-like train and 31.6M test pairs. Then computes **62 features**: rapidfuzz ratios, TF-IDF cosines, house-number exact/truncation/edit distance/relative difference, number-set similarity, name edit distance, legal forms, acronym match, name/address sharing counts, blocking context | about 4 min for train and 3 min for test |
+| Stage 1 | `train.py` | LightGBM, 2 folds grouped by *query cluster* (all records of one entity stay in the same fold), up to 1200 rounds, producing out-of-fold probabilities | about 20 min |
+| Stage 2 | `stage2.py` | Re-scores each pair with **29 extra features** built from the out-of-fold stage-1 scores: (a) the record's share, margin and rank among its candidates; (b) the entity's summed score and confident records; (c) **sibling agreement**, i.e. how many other candidates of the same entity share this record's house number, name, number+name or full address, and how many carry the entity's own number or name (plain and weighted); (d) **core-address similarity**, fuzzy scores after removing tokens found in >2% of the country's records (regions, departments, big cities, street types) | about 12 min |
+| Decision | `decide.py`, `tune.py` | Each record keeps only its best S1. Then each entity's match set is chosen to **maximize exact expected F0.5** (Poisson-binomial dynamic programming, tested against brute force), after isotonic calibration. A global threshold τ is the fallback. The best rule is chosen on out-of-fold predictions | |
+| Output | `output.py`, `predict.py` | Writes both TSVs and asserts every rule | the validator runs after each build |
 | Metric | `evaluate.py` | The exact macro F0.5, with a self-test on the problem statement's worked example | |
-| Test-like variant | `config.py` (`BER_VARIANT=tl`) | Drops 20% of train S1 entities so their records become decoys (about 41%, as in test). The model then learns test's decoy mix | |
+| Test-like variant | `config.py` (`BER_VARIANT=tl`) | Drops 20% of train S1 entities so their records become decoys (about 41%, as in test) | used for v03 onward |
 | Dev tools | `crosseval.py`, `bench_block.py` | Score one training variant's models on another's data; benchmark blocking on a sample | |
 
 Other files: `README.md` (how to reproduce), `requirements.txt` (pinned versions), `PLAN.md`, `submissions/SUBMISSIONS.md`.
@@ -88,86 +93,99 @@ Other files: `README.md` (how to reproduce), `requirements.txt` (pinned versions
 | Version | What changed | Local F0.5 (train mix) | Local F0.5 (test-like) | Public leaderboard |
 |---|---|---|---|---|
 | v01 | Baseline: blocking + 55 features + stage 1 + τ=0.7 | 0.98229 | 0.98036 | **0.976553** |
-| v02 | + stage 2 + expected-F0.5 selection | 0.98537 | 0.98158 | not uploaded |
-| v03 | + trained on the test-like variant, isotonic expected-F | — | **0.98316** | **0.976736** |
-| v1 | + France normalization fixes, 7 near-twin/acronym features, 1200 rounds | running | running | — |
+| v02 | + stage 2 (basic context) + expected-F0.5 selection | 0.98537 | 0.98158 | not uploaded |
+| v03 | + trained on the test-like variant, isotonic expected-F | — | 0.98316 | **0.976736** |
+| **v04** | + France normalization fixes, 7 near-twin/acronym features, 1200 rounds; stage 2 + **sibling agreement** + **core-address** features | — | **0.98550** (US 0.98639, India 0.98416) | **uploading** |
+| (experiment) | stage 3: context rebuilt from stage-2 scores | — | 0.98284 | not adopted |
 
 "Local" means out-of-fold predictions on all train S1 entities (singletons included), scored with the exact metric. "Test-like" is the same data with 20% of entities removed, so the decoy share matches test.
 
-### Error breakdown (stage 2, train out-of-fold)
+v04 gains, broken down on test-like validation:
+- **Stage 1:** 0.98128 → 0.98224, from the new features and longer training.
+- **Stage 2:** 0.98316 → 0.98550, of which the sibling and core-address features contribute about +0.0023.
+
+### Error breakdown (v02 stage 2, train out-of-fold)
 
 - **Precision is 99.7%** (22K wrong matches) and **recall 96.4%** (277K missed pairs).
-- 81% of the wrong matches are near-twin decoys: the same name and street with a nearby house number, or a one-letter name change at the same address.
+- 81% of the wrong matches are near-twin decoys.
 - Of the misses, 43% never reached the shortlist, 60% have no address (just a generic shared name), and the rest carry the same kind of number noise the decoys have.
+
+### Confidence on test, as the share of records whose best candidate scores in the uncertain 0.1–0.9 band
+
+| Data | v03 | v04 |
+|---|---|---|
+| Test France | 10.3% | **8.4%** |
+| Test India | 5.8% | **4.3%** |
+| Test US | 5.3% | **5.1%** |
+| Train, test-like (reference) | 3.2–3.8% | — |
+
+v04 is the first version whose improvement is visible *on test itself*, not only in validation.
 
 ---
 
 ## 6. What we have learned (important)
 
-1. **Local improvements are not reaching the leaderboard.** From v01 to v03, the test-like local score rose by 0.0028, but the leaderboard only rose by **0.0002**. Our validation doesn't yet represent test well. This is now the main thing to understand before building more.
-2. **Test is harder than train in ways we haven't reproduced.** We measured the share of records whose best candidate scores in the uncertain 0.1–0.9 band:
+1. **Local improvements have not been reaching the leaderboard.** From v01 to v03, the test-like local score rose by 0.0028, but the leaderboard only rose by **0.0002**. We are checking two explanations:
+   - *Validation optimism (leakage).* Stage 2 uses the out-of-fold stage-1 scores of *neighbouring* pairs, which come from other folds. We checked the main route: the models' minimum leaf size is 200 examples, while an entity has only 5–12 candidate pairs. So the model cannot memorize individual entities, which makes large leakage unlikely. Two smaller known sources remain: the learned maps and dictionary are fitted on all train pairs, and early stopping uses a slice of the fold being scored.
+   - *The leaderboard is dominated by something our validation can't measure, most likely France.* France is 15% of test, has no labels, and is the most uncertain country. If it is weak, or over-represented in the public subset, US/India gains barely move the leaderboard. **v04's score is the first real test of this,** since v04 is the first version that visibly improves France on test.
+2. **Sibling agreement is a strong missing signal.** Among uncertain pairs whose house number differs from S1's:
 
-   | Data | Uncertain share |
+   | Other candidates of the same entity sharing that number | Share that are true matches |
    |---|---|
-   | Train, test-like | 3.2–3.8% |
-   | Test US/India | 5.3–5.8% |
-   | Test France | 10.3% |
+   | 0 | 24% |
+   | 1 or more | 71–81% |
 
-   We checked the obvious causes and ruled them out:
+   So shared deviations are systematic source formats. For names the pattern reverses: a deviating name shared by several records falls to 14% true, the signature of a look-alike decoy entity.
+3. **Test is harder than train in ways we haven't reproduced.** We checked the obvious causes and ruled them out:
    - The rates of shared names and addresses, empty addresses, domains, "doing business as" names, Indian-script names and `H.no` prefixes are the same or lower in test.
-   - Dictionary coverage of Indian-script words is similar (97.8% in train vs 96.4% in test).
+   - Dictionary coverage is similar.
    - Decoy type barely matters: records orphaned by removing an entity and naturally occurring decoys are about equally hard.
-3. **France is about twice as uncertain as the other countries.**
-   - French records use departments where S1 uses regions (Gironde vs Nouvelle-Aquitaine), `n°5` number prefixes, `st-` vs `saint-`, the same avenue typos as the US, and extra words (Groupe, Participations, Holding, Et Fils, Et Associés).
-   - Some of these are fixed in v1. Others are genuinely ambiguous one-word swaps at the same address.
-4. **Validation is somewhat optimistic by construction.** The learned maps and dictionary were fitted on all train pairs, which include the validation folds. The effect is small but real.
+4. **France:** the fixes shipped in v04 reduced its uncertainty, but it is still about twice that of the other countries. The remaining French cases are mostly genuinely ambiguous one-word swaps at the same address ("Tourcoing Amicale Groupe" vs "Tourcoing Sport") and near-twin numbers.
+5. **More stacking doesn't help.** Stage 3 lost 0.0027 locally.
+6. **Blocking:** splitting *all* hyphens in addresses cost 0.0005 of India recall. The code is already fixed so that only purely alphabetic words are split (saint-nazaire, loire-atlantique) and IDs like B-425 stay intact. The fix takes effect in the next rebuild.
 
 ---
 
 ## 7. In progress right now
 
-- The **v1 rebuild** is running in the background (`work/v1_log.txt`). It includes:
-  - Re-learned maps and France normalization fixes (`n°`, hyphens, generic French words, a global street-typo map).
-  - Re-blocking. Train recall is 98.40%, slightly down because splitting every hyphen broke some Indian keys. That is already fixed in code for the next rebuild.
-  - 62 features and 1200-round training on the test-like variant, then stage 2, prediction and validation.
-  - Expected to finish around 23:15 IST.
+- **v04 upload and evaluation** (by the team). Its score decides the next step (§8-A).
+- Nothing is running in the background.
 
 ---
 
 ## 8. What is left to build (prioritized)
 
-### A. Close the local vs leaderboard gap (highest priority)
+### A. Close the local vs leaderboard gap (decided by v04's score)
 
-1. **Probe France's contribution with one diagnostic upload.** Submit v03 with every French row set to empty.
-   - The score change gives France's real per-entity F0.5: F_France ≈ (LB_v03 − LB_probe) / 0.15 + 0.06.
-   - If France is far below US and India, all effort goes to France. If not, France isn't the problem.
-2. **Probe the precision/recall balance.** One upload with a stricter decision, for example raising the minimum accepted probability.
-   - If the leaderboard goes up, test has more false positives than our validation predicts, so we tighten.
-   - If it goes down, we are losing recall.
-3. **Remove the dictionary/map leak from validation.** Learn the maps on the training folds only, so local scores are honest.
+1. **If v04 moves the leaderboard clearly (+0.002 or more):** France and near-twins were the bottleneck. Continue with B.4–B.6, which target France and near-twin handling.
+2. **If v04 barely moves:** spend one upload on the **France probe**, v04 with every French row set to empty.
+   - France's per-entity F0.5 ≈ (LB_v04 − LB_probe) / 0.15 + 0.06, accurate to about ±0.003.
+   - If the probe collapses to about 0.06, the public subset is essentially France-only, which would change our whole strategy.
+3. **Optional strictness probe:** one upload with a stricter decision. It tells us whether test is losing points to false matches or to missed ones.
+4. **Remove the small validation leaks:** learn the maps on the training folds only, and use a separate early-stopping slice.
 
-### B. Model and feature work (after A tells us where the loss is)
+### B. Model and feature work
 
-4. **Next rebuild:** the hyphen fix (only purely alphabetic words are split), plus more French generic words (fils, assoc, frs) in the strict name.
-5. **French address matching:** learn department ↔ region equivalence from the test files themselves (unsupervised co-occurrence with cities; no labels, no external data).
-6. **Truncated or added house numbers:** add a "S1 numbers covered by the record" feature, so an extra `H.no 50` prefix isn't read as a number conflict.
-7. **Blocking recall:** 43% of the misses never reach the shortlist. Try looser caps for compound keys and top-K by key type.
-8. **Model robustness:** train on the full data instead of 60% samples, average several seeds, try more folds (3–5).
-9. **Optional (day 2):** a small multilingual embedding model (multilingual-e5-small, MIT) as an extra similarity feature and blocking pass for Indian-script and domain names. Keep it only if the honest local score improves; use half/half training to avoid leakage.
+5. **Next rebuild:** the hyphen fix (already coded), plus more French generic words (fils, assoc, frs) in the strict name.
+6. **France:** departments vs regions, learned from the test files themselves by unsupervised co-occurrence with cities (no labels, no external data). More sibling-style consistency features for same-address one-word swaps.
+7. **Added or truncated house numbers:** a "S1 numbers covered by the record" feature, so an extra `H.no 50` prefix isn't read as a number conflict.
+8. **Blocking recall:** 43% of the misses never reach the shortlist. Try looser caps for compound keys and top-K by key type.
+9. **Model robustness:** full-data training instead of 60% samples, several seeds, more folds (3–5).
+10. **Optional:** a small multilingual embedding model (multilingual-e5-small, MIT) as an extra similarity feature and blocking pass. Keep it only if the honest local score improves.
 
 ### C. Deliverables (must do by 27 Sep)
 
-10. Fill in `Documentation_template.md` with the final methodology, blocking, features, model, results and error analysis. It is copied into the zip root.
-11. Final pass on `README.md` and `requirements.txt`, and check that every function has a comment describing it.
-12. A packaging script that builds `Genovate_submission.zip` with the required structure, re-runs the validator, and checks the zip's layout.
-13. Clean up the repo, and push to GitHub after the deadline (or earlier if it is made private).
+11. Fill in `Documentation_template.md` with the final methodology, blocking, features, model, results and error analysis. It is copied into the zip root.
+12. Final pass on `README.md` and `requirements.txt`, and check that every function has a comment describing it.
+13. A packaging script that builds `Genovate_submission.zip` with the required structure, re-runs the validator, and checks the zip's layout.
+14. Clean up the repo, and push to GitHub after the deadline (or earlier if it is made private).
 
 ---
 
 ## 9. Submission budget
 
-- **Used:** 25 Sep: 2 (v01, v03), with 3 left today. 26 Sep: 5. 27 Sep: 5.
-- Every upload tests one hypothesis. The next two proposed uploads are the diagnostic probes in §8-A. They are cheap, and they tell us where the remaining 0.009 points are.
+- **Used:** 25 Sep: v01, v03, and v04 (uploading), which leaves 2 today. 26 Sep: 5. 27 Sep: 5.
+- Every upload tests one hypothesis. The next upload is either the France probe (§8-A.2) or the next improvement, depending on v04's score.
 
 ## 10. How to run
 

@@ -23,10 +23,11 @@ def main(stage=1, rule=None):
     pairs = TR.predict_split(models, "test")
     pairs.write_parquet(C.work(C.MODEL_DIR, "test_pred.parquet"))
     name = "oof"
-    if stage == 2:
+    if stage >= 2:
         import stage2
-        pairs = stage2.predict_test()
-        name = "oof2"
+        for level in range(2, stage + 1):
+            pairs = stage2.predict_test(level)
+        name = f"oof{stage}"
     with open(C.work(C.MODEL_DIR, f"decision_{name}.json")) as f:
         dec = json.load(f)
     rule = rule or dec["rule"]

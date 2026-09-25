@@ -16,7 +16,9 @@ computed from stage-1 probabilities of *neighbouring* pairs:
 Train context uses OUT-OF-FOLD stage-1 probabilities only (train.py), so the
 stage-2 model never learns from over-confident in-sample scores.
 
-Outputs: model/s2_fold{k}.txt, model/oof2.parquet, model/test_pred2.parquet
+The same code stacks further: level L builds its context from level L-1
+probabilities (level 1 = train.py). Outputs per level L >= 2:
+model/s{L}_fold{k}.txt, model/oof{L}.parquet, model/test_pred{L}.parquet
 """
 import time
 import numpy as np
@@ -133,10 +135,15 @@ def _design(split, ctx, feats):
         yield part.join(ctx, on=["qid", "s1"], how="inner")
 
 
-def fit_predict_oof(frac=TR.TRAIN_FRAC):
-    """Train stage-2 fold models on OOF context; return OOF stage-2 probs."""
+def _name(kind, level):
+    """File stem of a level's predictions: oof / oof2 / oof3 ..., test_pred / test_pred2 ..."""
+    return kind + ("" if level == 1 else str(level))
+
+
+def fit_predict_oof(frac=TR.TRAIN_FRAC, level=2):
+    """Train level-L fold models on OOF context from level L-1; return OOF probs."""
     t0 = time.time()
-    oof = pl.read_parquet(C.work(C.MODEL_DIR, "oof.parquet"))
+    oof = pl.read_parquet(C.work(C.MODEL_DIR, _name("oof", level - 1) + ".parquet"))
     ctx = context(oof.select("qid", "s1", "p"), "train")
     feats = TR.feature_names() + S2_EXTRA
     lab = TR.add_folds(oof.select("qid", "s1").lazy()).select("qid", "s1", "y", "fold", "u").collect()
@@ -155,7 +162,7 @@ def fit_predict_oof(frac=TR.TRAIN_FRAC):
         del tr
         m = lgb.train(TR.PARAMS, dtr, TR.ROUNDS, valid_sets=[dva],
                       callbacks=[lgb.log_evaluation(200), lgb.early_stopping(50, verbose=False)])
-        m.save_model(str(C.work(C.MODEL_DIR, f"s2_fold{k}.txt")))
+        m.save_model(str(C.work(C.MODEL_DIR, f"s{level}_fold{k}.txt")))
         del dtr, dva
         for d in _design("train", ctx, feats):
             te = d.filter(pl.col("fold") == k)
@@ -164,14 +171,14 @@ def fit_predict_oof(frac=TR.TRAIN_FRAC):
         models.append(m)
         print(f"stage2 fold {k}: best iter {m.best_iteration} ({time.time() - t0:.0f}s)", flush=True)
     oof2 = pl.concat(outs)
-    oof2.write_parquet(C.work(C.MODEL_DIR, "oof2.parquet"))
+    oof2.write_parquet(C.work(C.MODEL_DIR, _name("oof", level) + ".parquet"))
     return models, oof2
 
 
-def predict_test():
-    """Stage-2 probabilities on test from stage-1 fold-average predictions."""
-    models = [lgb.Booster(model_file=str(C.work(C.MODEL_DIR, f"s2_fold{k}.txt"))) for k in range(TR.NFOLD)]
-    p1 = pl.read_parquet(C.work(C.MODEL_DIR, "test_pred.parquet"))
+def predict_test(level=2):
+    """Level-L probabilities on test from level L-1 fold-average predictions."""
+    models = [lgb.Booster(model_file=str(C.work(C.MODEL_DIR, f"s{level}_fold{k}.txt"))) for k in range(TR.NFOLD)]
+    p1 = pl.read_parquet(C.work(C.MODEL_DIR, _name("test_pred", level - 1) + ".parquet"))
     ctx = context(p1, "test")
     feats = TR.feature_names("test") + S2_EXTRA
     outs = []
@@ -180,9 +187,10 @@ def predict_test():
         p = np.mean([m.predict(X, num_threads=C.N_THREADS) for m in models], axis=0)
         outs.append(part.select("qid", "s1").with_columns(pl.Series("p", p.astype(np.float32))))
     out = pl.concat(outs)
-    out.write_parquet(C.work(C.MODEL_DIR, "test_pred2.parquet"))
+    out.write_parquet(C.work(C.MODEL_DIR, _name("test_pred", level) + ".parquet"))
     return out
 
 
 if __name__ == "__main__":
-    fit_predict_oof()
+    import sys
+    fit_predict_oof(level=int(sys.argv[1]) if len(sys.argv) > 1 else 2)
