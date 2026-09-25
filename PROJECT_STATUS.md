@@ -3,7 +3,7 @@
 **Team:** Hemanth Raj, Kushal K V, Ayush Khanuja
 **Status as of:** 25 Sep 2026, 22:20 IST
 **Deadline:** 27 Sep 2026, 23:59 IST. Target the final upload by about 20:00 IST on 27 Sep.
-**Best public leaderboard score:** 0.976736 (v03). **v04 has been handed over for upload** (best local score so far). The current #1 is 0.9859.
+**Best public leaderboard score:** 0.976736 (v03). **v04 is ready but not yet uploaded** (best local score so far). **Uploads: 2 of 5 used, 3 left.** The current #1 is 0.9859.
 
 This document covers what the problem is, what we have built, how well it works, what we have learned, and what is left to do. The detailed working plan is in [PLAN.md](PLAN.md), and every upload is logged in [submissions/SUBMISSIONS.md](submissions/SUBMISSIONS.md).
 
@@ -95,7 +95,7 @@ Other files: `README.md` (how to reproduce), `requirements.txt` (pinned versions
 | v01 | Baseline: blocking + 55 features + stage 1 + τ=0.7 | 0.98229 | 0.98036 | **0.976553** |
 | v02 | + stage 2 (basic context) + expected-F0.5 selection | 0.98537 | 0.98158 | not uploaded |
 | v03 | + trained on the test-like variant, isotonic expected-F | — | 0.98316 | **0.976736** |
-| **v04** | + France normalization fixes, 7 near-twin/acronym features, 1200 rounds; stage 2 + **sibling agreement** + **core-address** features | — | **0.98550** (US 0.98639, India 0.98416) | **uploading** |
+| **v04** | + France normalization fixes, 7 near-twin/acronym features, 1200 rounds; stage 2 + **sibling agreement** + **core-address** features | — | **0.98550** (US 0.98639, India 0.98416) | not yet uploaded |
 | (experiment) | stage 3: context rebuilt from stage-2 scores | — | 0.98284 | not adopted |
 
 "Local" means out-of-fold predictions on all train S1 entities (singletons included), scored with the exact metric. "Test-like" is the same data with 20% of entities removed, so the decoy share matches test.
@@ -148,7 +148,7 @@ v04 is the first version whose improvement is visible *on test itself*, not only
 
 ## 7. In progress right now
 
-- **v04 upload and evaluation** (by the team). Its score decides the next step (§8-A).
+- **v04 is waiting to be uploaded.** Its score decides the next step (§8-A).
 - Nothing is running in the background.
 
 ---
@@ -158,10 +158,10 @@ v04 is the first version whose improvement is visible *on test itself*, not only
 ### A. Close the local vs leaderboard gap (decided by v04's score)
 
 1. **If v04 moves the leaderboard clearly (+0.002 or more):** France and near-twins were the bottleneck. Continue with B.4–B.6, which target France and near-twin handling.
-2. **If v04 barely moves:** spend one upload on the **France probe**, v04 with every French row set to empty.
+2. **If v04 barely moves:** the France probe (v04 with every French row set to empty) would diagnose it, but with only 3 uploads left it is **not affordable**. We rely on local analysis instead.
    - France's per-entity F0.5 ≈ (LB_v04 − LB_probe) / 0.15 + 0.06, accurate to about ±0.003.
    - If the probe collapses to about 0.06, the public subset is essentially France-only, which would change our whole strategy.
-3. **Optional strictness probe:** one upload with a stricter decision. It tells us whether test is losing points to false matches or to missed ones.
+3. **Strictness probe:** dropped for the same reason (upload budget).
 4. **Remove the small validation leaks:** learn the maps on the training folds only, and use a separate early-stopping slice.
 
 ### B. Model and feature work
