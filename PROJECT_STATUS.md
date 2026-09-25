@@ -168,15 +168,17 @@ v04 is the first version whose improvement is visible *on test itself*, not only
 
 **Paused at 26 Sep, about 00:30 IST, at the team's request.** No new jobs are to be started until we resume.
 
-1. **Still running when paused: the overnight rebuild `r2`** (`work/r2_log.txt`, model folder `model_tl_r2`, git commit `d75657f`).
-   - It adds size-scaled blocking caps, the hyphen fix and French elision, then retrains the robust stack.
-   - Blocking is done: train pair recall **0.98439**, oracle 0.99518 (the hyphen fix recovered most of v04's small loss).
-   - It then builds features, runs stage 1, stage 2 and prediction, and **writes `output/`**. v04 and v05 are archived separately, so they are safe.
-   - On resume, read the end of `work/r2_log.txt` for the scores and the validator result.
+1. **The overnight rebuild `r2` has finished** (validator PASS; files archived in `submissions/r2_candidate/`, model folder `model_tl_r2`).
+   - It adds size-scaled blocking caps, the hyphen fix and French elision, on top of the robust stack.
+   - Blocking recall 0.98439 (oracle 0.99518). Local test-like F0.5: stage 1 0.98113, **stage 2 0.98464** (US 0.98540, India 0.98351).
+   - Local scores: v04 0.98550, v05 0.98486, r2 0.98464, all within 0.0009. The size-shift simulation decides which of them survives test's sizes best.
+   - **Nothing is running.**
 2. **Open decision: which version is upload #3.**
    - Local numbers favor **v04** (0.98550 vs 0.98486).
    - The argument for **v05** is that its features are far less shifted (adversarial AUC about 0.85 vs 0.99). That is not yet a measurement.
-3. **First thing to run on resume: `sizeshift.py`** (written and committed, not yet run; about 1 hour).
+3. **Resume order (from Feedback4 review):** (a) quick checks: the model-estimated singleton rate on test vs train, a scan of French 'doing business as' markers, French titles/legal words (Mme, Mlle, Sté, Cie, BP, CEDEX) confirmed against the data, per-country zero-candidate rates; (b) `sizeshift.py` for v04, v05 and r2; (c) leave-one-country-out; (d) one rebuild with the confirmed French rules, fuzzy intra-entity similarity and 'S1 numbers covered'. **Also ask the organizers:** which submission counts on the private leaderboard, and whether there is a zip size limit.
+
+   **`sizeshift.py`** (written and committed, not yet run; about 1 hour).
    - It builds a train "mini world" at test's sizes (US S1 at 50%, India at 92%, 41% decoys), re-blocks it with the original caps, and scores v04 and v05 out-of-fold.
    - Whichever degrades less under the size shift is the evidence-based choice for upload #3.
    - Also score r2 the same way once it has finished.
