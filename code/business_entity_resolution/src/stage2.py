@@ -27,7 +27,7 @@ import lightgbm as lgb
 import config as C
 import train as TR
 
-S2_EXTRA = ["p", "q_pmax", "q_p2", "q_psum", "q_share", "q_margin", "q_isbest", "q_n",
+S2_EXTRA = ["p", "q_pmax", "q_p2", "q_psum", "q_share", "q_margin", "q_isbest",
             "s_psum", "s_nconf", "s_pmax_other", "s_prank", "s_nbest", "s_psum_best",
             "sib_hn_same", "sib_hn_same_p", "sib_nm_same", "sib_nm_same_p",
             "sib_both_same", "sib_both_same_p", "sib_ad_same", "sib_ad_same_p",
@@ -84,16 +84,20 @@ def sibling_features(pairs, s1n, qn):
     qa = qn.select("qid", pl.col("ad_hn").alias("hq"), pl.col("nm_cmp").alias("nq"), pl.col("ad").alias("aq"))
     sa = s1n.select(pl.col("idx").alias("s1"), pl.col("ad_hn").alias("hs"), pl.col("nm_cmp").alias("ns"))
     x = pairs.select("qid", "s1", "p").join(qa, on="qid", how="left").join(sa, on="s1", how="left")
+    # count only CONFIDENT siblings (stage-1 p > 0.5): raw candidate counts depend
+    # on how many low-score candidates blocking produced, which differs by dataset
+    x = x.with_columns((pl.col("p") > 0.5).cast(pl.Int32).alias("_conf"))
     x = x.with_columns((pl.col("hq") == pl.col("hs")).alias("_heq"), (pl.col("nq") == pl.col("ns")).alias("_neq"))
     out = [pl.col("qid"), pl.col("s1")]
     for name, keys, valid in (("hn", ["s1", "hq"], pl.col("hq") != ""),
                               ("nm", ["s1", "nq"], pl.col("nq") != ""),
                               ("both", ["s1", "hq", "nq"], pl.col("hq") != ""),
                               ("ad", ["s1", "aq"], pl.col("aq") != "")):
-        out.append(pl.when(valid).then(pl.len().over(keys) - 1).otherwise(-1).alias(f"sib_{name}_same"))
+        out.append(pl.when(valid).then(pl.col("_conf").sum().over(keys) - pl.col("_conf")).otherwise(-1).alias(f"sib_{name}_same"))
         out.append(pl.when(valid).then(pl.col("p").sum().over(keys) - pl.col("p")).otherwise(-1).alias(f"sib_{name}_same_p"))
     for name, flag in (("hn", "_heq"), ("nm", "_neq")):
-        cnt = pl.col(flag).cast(pl.Int32).sum().over("s1") - pl.col(flag).cast(pl.Int32)
+        f_c = pl.col(flag).cast(pl.Int32) * pl.col("_conf")
+        cnt = f_c.sum().over("s1") - f_c
         psum = (pl.col("p") * pl.col(flag).cast(pl.Float32)).sum().over("s1") - pl.col("p") * pl.col(flag).cast(pl.Float32)
         out.append(cnt.alias(f"sib_{name}_eq_s"))
         out.append(psum.alias(f"sib_{name}_eq_s_p"))
@@ -119,7 +123,7 @@ def context(pairs, split="train"):
         pl.col("p").sort(descending=True).get(1, null_on_oob=True).fill_null(0).alias("s_p2"))
     x = x.join(s, on="s1").with_columns(
         pl.when(pl.col("p") >= pl.col("s_pmax")).then(pl.col("s_p2")).otherwise(pl.col("s_pmax")).alias("s_pmax_other"),
-        pl.col("p").rank("ordinal", descending=True).over("s1").alias("s_prank"))
+        pl.col("p").rank("ordinal", descending=True).over("s1").clip(upper_bound=8).alias("s_prank"))
     import blocking as B
     s1n, qn = B.load_norm(split)
     x = x.join(sibling_features(pairs, s1n, qn), on=["qid", "s1"], how="left")

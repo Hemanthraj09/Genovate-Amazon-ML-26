@@ -25,7 +25,15 @@ OUT_DIR = Path(os.environ.get("BER_OUT_DIR", REPO_DIR / "output"))
 VARIANT = os.environ.get("BER_VARIANT", "")
 DROP_FRAC = float(os.environ.get("BER_DROP_FRAC", "0.2")) if VARIANT == "tl" else 0.0
 TRAIN_TAG = "train" + (f"_{VARIANT}" if VARIANT else "")
-MODEL_DIR = "model" + (f"_{VARIANT}" if VARIANT else "")
+MODEL_TAG = os.environ.get("BER_MODEL_TAG", "")   # optional suffix to keep model sets apart
+MODEL_DIR = "model" + (f"_{VARIANT}" if VARIANT else "") + (f"_{MODEL_TAG}" if MODEL_TAG else "")
+# Blocking-score artefacts: their scale depends on dataset size and key caps, so
+# they shift between train and test (adversarial AUC 0.99 -> 0.73 without them).
+# When ROBUST is on they are not used as model features (blocking still uses them
+# to build and prune the candidate set).
+ROBUST = os.environ.get("BER_ROBUST", "1") == "1"
+BLOCKING_ARTEFACTS = ("score", "nk", "gap_best", "gap_second", "q_ncand_raw", "s_ncand",
+                      "s_rank", "rank", "rel")
 
 SEED = 42
 N_THREADS = max(1, (os.cpu_count() or 4) - 2)

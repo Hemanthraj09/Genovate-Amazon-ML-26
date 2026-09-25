@@ -146,10 +146,27 @@ v04 is the first version whose improvement is visible *on test itself*, not only
 
 ---
 
+## 6b. Diagnostics after the third feedback round (26 Sep, about 00:00 IST)
+
+| Check | Result | Meaning |
+|---|---|---|
+| **Honest holdout**: half of the entities never seen by any model; stage 1 and stage 2 run exactly as on test (averaged fold models, fold-averaged context) | Honest stage 2 scores 0.98494 vs ordinary out-of-fold 0.98545 on the same entities. The **stage-2 gain is +0.0040 honest vs +0.0036 out-of-fold** | No leakage: our validation is trustworthy *for train-like data*. |
+| **Adversarial validation**: can a model tell test pairs from test-like train pairs? | **AUC 0.992** (US 0.996, India 0.986). 87% of it comes from `q_ncand_raw`, then `score`, `s_ncand` and `gap_second` | **This is the main problem.** Blocking caps are absolute counts and IDF depends on N. Test's S1 is half train's size (US 663K vs 1.32M), so far more keys pass the caps and every blocking-derived number is on a different scale. The model's #1 feature (`gap_second`) is one of them. |
+| Adversarial validation without the 9 blocking artefacts | AUC **0.73** (US), **0.71** (India). The rest is mostly name-sharing counts | The remaining shift is largely real (test US has fewer same-name competitors), so those counts are kept. |
+| Adversarial validation on the stage-2 context | AUC 0.95, from the candidate count per record and the raw sibling counts. Test France has 24.7 siblings sharing the entity's house number vs about 5 in the US, while *confident* candidates per entity are the same everywhere (3.4–3.6) | Count only confident siblings; drop the candidate count. |
+| Row-order tie-breaking (§2.9 of the feedback) | Spearman(S1 row, S2 row) = 0.001; ties split 50/50 | Ruled out. |
+| Entity-level loss (v04 validation, total 0.0145) | Misses-only entities 59%, entities with false matches 16%, model rejected all 11%, blocking lost all 7%, singleton false matches 6%. **About a third of all loss is blocking misses.** 1-match entities are the weakest group (mean F 0.952) | Recall, not precision, dominates the local loss. |
+
+**Fix in progress ("robust" model set, `BER_MODEL_TAG=robust`):**
+- Stage 1 no longer uses the 9 blocking-artefact features (`score, nk, gap_best, gap_second, q_ncand_raw, s_ncand, s_rank, rank, rel`). Blocking still uses them to build and prune candidates.
+- Stage 2 drops the candidate count, counts only confident siblings (stage-1 p > 0.5), and caps rank at 8.
+- **Pending decision on feedback item 8** (learning maps from confident test predictions): this is pseudo-labeling on test, so we have asked the organizers via the query form. It will not be used until they answer.
+- **Upload budget confirmed: 5 in total, 2 used, 3 left.** No diagnostic probes; every upload must be a real candidate.
+
 ## 7. In progress right now
 
 - **v04 is waiting to be uploaded.** Its score decides the next step (§8-A).
-- Nothing is running in the background.
+- The robust retraining is running (stage 1 → stage 2 → prediction, about 45 min). Next: adversarial re-check of its features, then decide whether it beats v04 as the upload.
 
 ---
 

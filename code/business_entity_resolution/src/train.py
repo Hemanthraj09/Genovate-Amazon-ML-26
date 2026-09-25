@@ -58,8 +58,9 @@ def add_folds(lf):
 
 
 def feature_names(split="train"):
-    """Model feature columns (everything except ids)."""
-    return [c for c in feat_scan(split).collect_schema().names() if c not in ID_COLS]
+    """Model feature columns (everything except ids, and blocking artefacts if ROBUST)."""
+    drop = set(ID_COLS) | (set(C.BLOCKING_ARTEFACTS) if C.ROBUST else set())
+    return [c for c in feat_scan(split).collect_schema().names() if c not in drop]
 
 
 def fit_folds():
