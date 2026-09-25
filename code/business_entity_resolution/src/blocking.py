@@ -28,6 +28,7 @@ KEY_TYPES = {"n": 0, "nb": 1, "p4": 2, "a": 3, "ab": 4, "#": 5, "nh": 6, "th": 7
 SINGLE_TYPES = (0, 3, 4, 5)
 CAP_CROSS = 80      # cap for name-token x address and number x word cross keys
 CROSS_TYPES = (7, 8, 9)
+CAP_REF_N = 1_000_000   # caps above are defined for an S1 partition of this size
 TOPK = 12           # candidates kept per query (before any relative cut)
 QCHUNK = 150_000    # queries per join chunk (memory bound)
 
@@ -99,11 +100,18 @@ def build_keys(df, id_col, side="q"):
 def block_country(s1n, qn, cap=CAP, topk=TOPK):
     """Top-K S1 candidates for every query record of one country partition."""
     n1 = s1n.height
+    # caps scale with the S1 partition size so that key selection depends on a
+    # key's *relative* frequency; absolute caps made test (smaller S1) keep far
+    # more keys than train, shifting every blocking-derived statistic
+    scale = n1 / CAP_REF_N
+    c_single = max(10, round(CAP_SINGLE * scale))
+    c_cross = max(10, round(CAP_CROSS * scale))
+    c_other = max(20, round(cap * scale))
     sk = build_keys(s1n, "idx", side="s1").rename({"id": "s1"})
     dfk = sk.group_by("h").agg(pl.len().alias("df"), pl.col("ty").first())
-    dfk = dfk.filter(pl.when(pl.col("ty").is_in(SINGLE_TYPES)).then(pl.col("df") <= CAP_SINGLE)
-                     .when(pl.col("ty").is_in(CROSS_TYPES)).then(pl.col("df") <= CAP_CROSS)
-                     .otherwise(pl.col("df") <= cap)).with_columns(
+    dfk = dfk.filter(pl.when(pl.col("ty").is_in(SINGLE_TYPES)).then(pl.col("df") <= c_single)
+                     .when(pl.col("ty").is_in(CROSS_TYPES)).then(pl.col("df") <= c_cross)
+                     .otherwise(pl.col("df") <= c_other)).with_columns(
         (pl.lit(math.log(n1)) - pl.col("df").cast(pl.Float64).log()).cast(pl.Float32).alias("w"))
     sk = sk.drop("ty").join(dfk.select("h", "w"), on="h")
     out = []

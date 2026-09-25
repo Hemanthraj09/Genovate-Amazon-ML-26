@@ -96,6 +96,7 @@ Other files: `README.md` (how to reproduce), `requirements.txt` (pinned versions
 | v02 | + stage 2 (basic context) + expected-F0.5 selection | 0.98537 | 0.98158 | not uploaded |
 | v03 | + trained on the test-like variant, isotonic expected-F | — | 0.98316 | **0.976736** |
 | **v04** | + France normalization fixes, 7 near-twin/acronym features, 1200 rounds; stage 2 + **sibling agreement** + **core-address** features | — | **0.98550** (US 0.98639, India 0.98416) | not yet uploaded |
+| **v05 (candidate)** | **Robust**: 9 blocking-score artefacts removed from the model, stage-2 sibling counts over confident siblings only | — | 0.98486 (US 0.98574, India 0.98355) | not yet uploaded, **recommended for upload #3** |
 | (experiment) | stage 3: context rebuilt from stage-2 scores | — | 0.98284 | not adopted |
 
 "Local" means out-of-fold predictions on all train S1 entities (singletons included), scored with the exact metric. "Test-like" is the same data with 20% of entities removed, so the decoy share matches test.
@@ -165,10 +166,15 @@ v04 is the first version whose improvement is visible *on test itself*, not only
 
 ## 7. In progress right now
 
-- **v04 is waiting to be uploaded.** Its score decides the next step (§8-A).
-- The robust retraining is running (stage 1 → stage 2 → prediction, about 45 min). Next: adversarial re-check of its features, then decide whether it beats v04 as the upload.
-
----
+- **v05 (robust) is ready:** [submissions/v05_candidate/matching_results.tsv](submissions/v05_candidate/matching_results.tsv), validator PASS, tag `v05`.
+  - It is 0.0006 below v04 locally, but its features are far less shifted: the stage-2 design's adversarial AUC is US 0.877 and India 0.825, against about 0.99 for v04.
+  - Test uncertain share: France 7.4%, India 4.0%, US 4.6%.
+  - Recommended as upload #3, because it is the version whose local score should best predict test, and it directly tests the shift diagnosis.
+- **Overnight rebuild `r2` is running** (`work/r2_log.txt`, model folder `model_tl_r2`, about 1.5 h). It adds:
+  - **Size-scaled blocking caps:** each cap is multiplied by (S1 partition size / 1M), so key selection depends on relative frequency and candidate sets are comparable between train and test.
+  - The hyphen fix (only purely alphabetic words are split) and French elision (l', d').
+  - Re-learned maps, re-blocking, new features, then the robust stage 1 and stage 2.
+  - It is the candidate for upload #4 if it beats v05 locally and on the adversarial check.
 
 ## 8. What is left to build (prioritized)
 

@@ -69,6 +69,7 @@ ADDR_ABBR = {w: g[0] for g in _ADDR_GROUPS for w in g}
 ADDR_DROP = {"no", "nos", "h", "hno", "h.no", "hn", "door", "number", "num", "n°",
              "null", "<null>", "n/a", "na", "none", "nil", "1/2", "cdp", "of", "the", "city",
              "de", "du", "des", "la", "le", "les", "d", "l"}
+ELISION_RE = re.compile(r"(?<![a-z])[ld]['’](?=[a-z])")
 ALPHA_HYPHEN_RE = re.compile(r"(?<=[a-z])-(?=[a-z])")
 POBOX_RE = re.compile(r"^(?:p\.?\s*o\.?\s*box|pmb|box)\s*#?\s*\w+$")
 
@@ -228,6 +229,7 @@ def consonant_key(tok):
 def _name_tokens(s):
     """Lowercase tokens with punctuation cleaned; legal forms canonicalized."""
     s = s.lower().replace("m/s", " ")
+    s = ELISION_RE.sub("", s)                              # french elision: l'etoile -> etoile
     s = re.sub(r"\b((?:[a-z]\.){2,}[a-z]?)", lambda m: m.group(1).replace(".", ""), s)  # l.l.c. -> llc
     s = s.replace("&", " and ").replace("+", " ").replace("-", " ").replace("/", " ")
     s = re.sub(r"[\(\)\[\]\{\}<>\"*|_~^=:;!?]", " ", s)
@@ -333,6 +335,7 @@ def _addr_comp_tokens(comp):
     # split hyphenated words only when purely alphabetic (saint-nazaire ->
     # saint nazaire); keep alphanumeric ids such as b-425 / a-19 intact
     comp = ALPHA_HYPHEN_RE.sub(" ", comp)
+    comp = ELISION_RE.sub(" ", comp)
     out = []
     for t in comp.split():
         t = t.strip("-/'")
