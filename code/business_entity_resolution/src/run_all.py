@@ -5,8 +5,12 @@
                                  # blocking, features, train, tune, stage2, tune2, predict)
 Each step writes its artefacts under WORK_DIR, so steps can be re-run alone.
 """
+import os
 import sys
 import time
+
+# The final submission is trained with the test-like variant (see config.py).
+os.environ.setdefault("BER_VARIANT", "tl")
 
 STEPS = ["prepare", "maps", "normalize", "blocking", "features", "train", "tune",
          "stage2", "tune2", "predict"]
