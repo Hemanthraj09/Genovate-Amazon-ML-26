@@ -21,7 +21,7 @@ import polars as pl
 import scipy.sparse as sp
 from joblib import Parallel, delayed
 from rapidfuzz import fuzz, process
-from rapidfuzz.distance import JaroWinkler
+from rapidfuzz.distance import JaroWinkler, Levenshtein
 from sklearn.feature_extraction.text import HashingVectorizer, TfidfTransformer
 import config as C
 import blocking as B
@@ -122,6 +122,16 @@ def chunk_features(p, mats):
     f["ad_tset"] = _cp(aq, as_, fuzz.token_set_ratio)
     f["ad_tsort"] = _cp(aq, as_, fuzz.token_sort_ratio)
     f["ad_partial"] = _cp(aq, as_, fuzz.partial_ratio)
+    # numeric near-twin features: noise usually costs one edit on the house
+    # number (truncation / one digit), look-alike decoys usually differ more
+    hq, hs = p["ad_hn"].to_list(), p["ad_hn_1"].to_list()
+    both = ((p["ad_hn"] != "") & (p["ad_hn_1"] != "")).to_numpy()
+    f["hn_lev"] = np.where(both, _cp(hq, hs, Levenshtein.distance), -1).astype(np.float32)
+    uq, us = p["ad_nums"].to_list(), p["ad_nums_1"].to_list()
+    f["nums_tset"] = _cp(uq, us, fuzz.token_set_ratio)
+    f["nums_nlev"] = _cp(uq, us, Levenshtein.normalized_distance)
+    f["nm_lev"] = _cp(nq, ns, Levenshtein.distance)
+    f["cmp_lev"] = _cp(cq, cs, Levenshtein.distance)
     qr, sr = p["qrow"].to_numpy(), p["srow"].to_numpy()
     for name, (Ms, Mq) in mats.items():
         f[name] = rowwise_cos(Ms, sr, Mq, qr)
@@ -170,6 +180,15 @@ def chunk_features(p, mats):
         pl.col("ad_unit").str.split(" ").list.set_intersection(pl.col("ad_unit_1").str.split(" "))
           .list.eval(pl.element().filter(pl.element() != "")).list.len().cast(pl.Float32).alias("unit_common"),
         (pl.col("qid") >= B.QSHIFT).cast(pl.Float32).alias("src3"),
+        ((pl.col("ad_hn").cast(pl.Float64, strict=False) - pl.col("ad_hn_1").cast(pl.Float64, strict=False)).abs()
+         / pl.max_horizontal(pl.col("ad_hn").cast(pl.Float64, strict=False),
+                             pl.col("ad_hn_1").cast(pl.Float64, strict=False), pl.lit(1.0))
+         ).fill_null(-1).cast(pl.Float32).alias("hn_reldiff"),
+        # acronym: record name = initials of the S1 name (e.g. 'af' for 'ace foundation')
+        (pl.col("nm_1").str.split(" ").list.eval(pl.element().str.slice(0, 1)).list.join("").alias("_ini")
+         == pl.col("nm_cmp")).cast(pl.Float32).alias("acr_eq"),
+        (pl.col("nm_cmp").str.starts_with(pl.col("nm_1").str.split(" ").list.eval(pl.element().str.slice(0, 1)).list.join(""))
+         & (pl.col("nm_1").str.count_matches(" ") >= 1)).cast(pl.Float32).alias("acr_prefix"),
     )
     return pl.concat([e, out], how="horizontal")
 
