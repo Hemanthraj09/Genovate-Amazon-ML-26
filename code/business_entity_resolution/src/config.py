@@ -18,6 +18,15 @@ DATA_DIR = Path(os.environ.get(
 WORK_DIR = Path(os.environ.get("BER_WORK_DIR", REPO_DIR / "work"))
 OUT_DIR = Path(os.environ.get("BER_OUT_DIR", REPO_DIR / "output"))
 
+# Training variant. "tl" = test-like: a fixed DROP_FRAC share of train S1
+# entities is removed, so their S2/S3 records become unmatched decoys. This
+# reproduces the higher decoy share of the test set (~41% of S2/S3 records
+# vs 27% in train) so the model learns the right prior and feature context.
+VARIANT = os.environ.get("BER_VARIANT", "")
+DROP_FRAC = float(os.environ.get("BER_DROP_FRAC", "0.2")) if VARIANT == "tl" else 0.0
+TRAIN_TAG = "train" + (f"_{VARIANT}" if VARIANT else "")
+MODEL_DIR = "model" + (f"_{VARIANT}" if VARIANT else "")
+
 SEED = 42
 N_THREADS = max(1, (os.cpu_count() or 4) - 2)
 

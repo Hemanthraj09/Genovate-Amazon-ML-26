@@ -28,9 +28,14 @@ PARAMS = dict(objective="binary", learning_rate=0.08, num_leaves=255, min_data_i
 ROUNDS = 800
 
 
+def feat_dir(split):
+    """Feature folder of a split (train uses the active variant's folder)."""
+    return C.work("feat", C.TRAIN_TAG if split == "train" else split, "x").parent
+
+
 def feat_scan(split):
     """Lazy scan over the feature chunk files of a split."""
-    return pl.scan_parquet(str(C.work("feat", split, "x").parent / "part_*.parquet"))
+    return pl.scan_parquet(str(feat_dir(split) / "part_*.parquet"))
 
 
 def cluster_table():
@@ -62,7 +67,7 @@ def fit_folds():
     t0 = time.time()
     feats = feature_names()
     lf = add_folds(feat_scan("train"))
-    C.work("model", "x")
+    C.work(C.MODEL_DIR, "x")
     models = []
     for k in range(NFOLD):
         tr = lf.filter((pl.col("fold") != k) & (pl.col("u") < TRAIN_FRAC)).collect()
@@ -73,7 +78,7 @@ def fit_folds():
         del tr
         m = lgb.train(PARAMS, dtr, ROUNDS, valid_sets=[dva],
                       callbacks=[lgb.log_evaluation(100), lgb.early_stopping(50, verbose=False)])
-        m.save_model(str(C.work("model", f"lgb_fold{k}.txt")))
+        m.save_model(str(C.work(C.MODEL_DIR, f"lgb_fold{k}.txt")))
         print(f"fold {k}: best iter {m.best_iteration}  ({time.time() - t0:.0f}s)", flush=True)
         models.append(m)
     return models
@@ -81,7 +86,7 @@ def fit_folds():
 
 def load_models():
     """Load the saved fold models."""
-    return [lgb.Booster(model_file=str(C.work("model", f"lgb_fold{k}.txt"))) for k in range(NFOLD)]
+    return [lgb.Booster(model_file=str(C.work(C.MODEL_DIR, f"lgb_fold{k}.txt"))) for k in range(NFOLD)]
 
 
 def predict_oof(models):
@@ -95,14 +100,14 @@ def predict_oof(models):
         out.append(part.select("qid", "s1", "y").with_columns(pl.Series("p", p.astype(np.float32))))
         del part
     oof = pl.concat(out)
-    oof.write_parquet(C.work("model", "oof.parquet"))
+    oof.write_parquet(C.work(C.MODEL_DIR, "oof.parquet"))
     return oof
 
 
 def predict_split(models, split):
     """Average of fold models' probabilities for every pair of a split."""
     feats = feature_names(split)
-    files = sorted(C.work("feat", split, "x").parent.glob("part_*.parquet"))
+    files = sorted(feat_dir(split).glob("part_*.parquet"))
     out = []
     for f in files:
         part = pl.read_parquet(f)
@@ -117,5 +122,5 @@ if __name__ == "__main__":
     oof = predict_oof(ms)
     imp = sorted(zip(ms[0].feature_name(), ms[0].feature_importance("gain")), key=lambda x: -x[1])
     print("top features:", [(n, int(g)) for n, g in imp[:25]])
-    with open(C.work("model", "feature_importance.json"), "w") as f:
+    with open(C.work(C.MODEL_DIR, "feature_importance.json"), "w") as f:
         json.dump([(n, float(g)) for n, g in imp], f)

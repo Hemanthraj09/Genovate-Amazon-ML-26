@@ -18,9 +18,11 @@ import evaluate as E
 
 def load_oof(name="oof"):
     """OOF pair probabilities and the evaluation universe."""
-    oof = pl.read_parquet(C.work("model", f"{name}.parquet"))
-    s1 = pl.read_parquet(C.work("raw", "train_s1.parquet")).select("idx", "country")
-    truth = B.true_pairs()
+    oof = pl.read_parquet(C.work(C.MODEL_DIR, f"{name}.parquet"))
+    drop = B.dropped_s1()
+    s1 = (pl.read_parquet(C.work("raw", "train_s1.parquet")).select("idx", "country")
+            .filter(~pl.col("idx").is_in(drop)))
+    truth = B.true_pairs().filter(~pl.col("s1").is_in(drop))
     return oof, s1, truth
 
 
@@ -62,10 +64,10 @@ def main(name="oof"):
     raw_ef = report(D.by_expected_f(assigned), truth, s1, "argmax + raw p + expected-F")
     dec = {"tau": best[0], "threshold": best[1], "ef_iso": sc_ef, "ef_raw": raw_ef}
     dec["rule"] = max(("threshold", "ef_iso", "ef_raw"), key=lambda r: dec[r])
-    with open(C.work("model", f"decision_{name}.json"), "w") as f:
+    with open(C.work(C.MODEL_DIR, f"decision_{name}.json"), "w") as f:
         json.dump(dec, f, indent=1)
     import pickle
-    with open(C.work("model", f"isotonic_{name}.pkl"), "wb") as f:
+    with open(C.work(C.MODEL_DIR, f"isotonic_{name}.pkl"), "wb") as f:
         pickle.dump(iso, f)
     print(dec)
     return dec

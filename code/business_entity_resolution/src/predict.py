@@ -21,18 +21,18 @@ def main(stage=1, rule=None):
     """
     models = TR.load_models()
     pairs = TR.predict_split(models, "test")
-    pairs.write_parquet(C.work("model", "test_pred.parquet"))
+    pairs.write_parquet(C.work(C.MODEL_DIR, "test_pred.parquet"))
     name = "oof"
     if stage == 2:
         import stage2
         pairs = stage2.predict_test()
         name = "oof2"
-    with open(C.work("model", f"decision_{name}.json")) as f:
+    with open(C.work(C.MODEL_DIR, f"decision_{name}.json")) as f:
         dec = json.load(f)
     rule = rule or dec["rule"]
     assigned = D.assign_argmax(pairs)
     if rule == "ef_iso":
-        with open(C.work("model", f"isotonic_{name}.pkl"), "rb") as f:
+        with open(C.work(C.MODEL_DIR, f"isotonic_{name}.pkl"), "rb") as f:
             iso = pickle.load(f)
         import tune
         matches = D.by_expected_f(tune.calibrate(assigned, iso))

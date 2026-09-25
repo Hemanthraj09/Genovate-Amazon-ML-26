@@ -146,6 +146,14 @@ def run(split, cap=CAP, topk=TOPK, countries=None):
     return cand
 
 
+def dropped_s1():
+    """Train S1 ids removed in the test-like variant (deterministic hash)."""
+    s1 = pl.read_parquet(C.work("raw", "train_s1.parquet"), columns=["idx"])
+    if C.DROP_FRAC <= 0:
+        return s1.head(0)["idx"]
+    return s1.filter((pl.col("idx").hash(seed=99) % 1000) < int(C.DROP_FRAC * 1000))["idx"]
+
+
 def true_pairs():
     """Train ground truth as (qid, s1) rows."""
     p = pl.read_parquet(C.work("raw", "train_pairs.parquet"))

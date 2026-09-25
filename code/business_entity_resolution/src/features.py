@@ -77,9 +77,14 @@ def rowwise_cos(A, ia, Bm, ib):
 
 
 # ---------------------------------------------------------------- tables
-def load_tables(split):
-    """Normalized S1 / query tables with row positions and sharing counts."""
+def load_tables(split, drop=None):
+    """Normalized S1 / query tables with row positions and sharing counts.
+
+    `drop`: S1 ids to remove (test-like variant); their records stay as queries.
+    """
     s1, q = B.load_norm(split)
+    if drop is not None and len(drop):
+        s1 = s1.filter(~pl.col("idx").is_in(drop))
     s1 = s1.with_row_index("srow")
     q = q.with_row_index("qrow")
     nm_f = s1.group_by("country", "nm").agg(pl.len().alias("nm_freq"))
@@ -173,9 +178,16 @@ def build(split, topk=12, rel=0.3, tag=None):
     """Compute features for all pruned candidates of a split; save parquet."""
     t0 = time.time()
     cand = pl.read_parquet(C.work("cand", f"{split}.parquet"))
+    drop = B.dropped_s1() if split == "train" else None
+    if drop is not None and len(drop):
+        cand = (cand.filter(~pl.col("s1").is_in(drop))
+                    .sort(["qid", "score"], descending=[False, True])
+                    .with_columns(pl.int_range(1, pl.len() + 1).over("qid").cast(pl.UInt8).alias("rank")))
+        print(f"[{split}] test-like variant: dropped {len(drop):,} S1 entities", flush=True)
+    tag = tag or (C.TRAIN_TAG if split == "train" else split)
     cand = prune_candidates(cand, topk, rel)
     print(f"[{split}] pruned candidates: {cand.height:,} ({time.time() - t0:.0f}s)", flush=True)
-    s1, q = load_tables(split)
+    s1, q = load_tables(split, drop)
     mats = {}
     # (address char n-grams are skipped: ~5 GB for 12M addresses; rapidfuzz covers them)
     mats["nm_char_cos"] = tfidf_pair(s1["nm"].to_list(), q["nm"].to_list(), "char_wb", (3, 3))
@@ -188,7 +200,7 @@ def build(split, topk=12, rel=0.3, tag=None):
              "ad_hn", "ad_unit", "q_nm_freq", "q_ad_freq"]
     s1t = s1.select(scols).rename({c: c + "_1" for c in scols if c not in ("idx", "srow", "nm_freq", "ad_freq")})
     qt = q.select(qcols)
-    out_dir = C.work("feat", tag or split, "x").parent
+    out_dir = C.work("feat", tag, "x").parent
     for old in out_dir.glob("part_*.parquet"):
         old.unlink()
     n = 0
