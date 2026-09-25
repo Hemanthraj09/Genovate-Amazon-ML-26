@@ -45,7 +45,7 @@ def main(model_dir):
     a1 = D.assign_argmax(p1)
     for tau in (0.6, 0.7, 0.8):
         tune.report(D.by_threshold(a1, tau), truth, s1, f"[{model_dir}] stage1 tau={tau}")
-    ctx = S2.context(p1.select("qid", "s1", "p"))
+    ctx = S2.context(p1.select("qid", "s1", "p"), "train")
     p2 = oof_with(model_dir, "s2_fold", extra_ctx=ctx)
     a2 = D.assign_argmax(p2)
     for tau in (0.6, 0.7, 0.8, 0.85):
