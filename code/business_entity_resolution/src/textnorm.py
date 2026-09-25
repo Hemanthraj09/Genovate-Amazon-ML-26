@@ -275,14 +275,20 @@ def norm_name(raw):
             flags |= 8
             alt = " ".join(_split_core(_name_tokens(before + " " + after))[0])
             low = after
-    dm = DOMAIN_RE.match(low.strip())
+    dm = None
+    for w in low.split():                                # domain anywhere (after honorifics etc.)
+        dm = DOMAIN_RE.match(w.strip("|,;()[]"))
+        if dm:
+            break
     if dm:
         flags |= 1
         stem = dm.group(1).replace("-", "")
         stem = fix_leet(stem)
         return {"nm": stem, "nm_s": stem, "nm_cmp": stem, "nm_alt": alt, "nm_leg": "",
                 "flags": flags}
-    if low.startswith("@") or (low.startswith("#") and " " not in low.strip()):
+    bare = [w for w in low.split() if w not in HONORIFIC]
+    if len(bare) == 1 and bare[0][:1] in "@#":
+        low = bare[0]
         flags |= 2
         stem = fix_leet(re.sub(r"[^a-z0-9]", "", low))
         return {"nm": stem, "nm_s": stem, "nm_cmp": stem, "nm_alt": alt, "nm_leg": "",
