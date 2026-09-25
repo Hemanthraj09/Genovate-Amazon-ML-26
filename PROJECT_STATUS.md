@@ -184,8 +184,9 @@ v04 is the first version whose improvement is visible *on test itself*, not only
 
 ## 9. Submission budget
 
-- **Used:** 25 Sep: v01, v03, and v04 (uploading), which leaves 2 today. 26 Sep: 5. 27 Sep: 5.
-- Every upload tests one hypothesis. The next upload is either the France probe (§8-A.2) or the next improvement, depending on v04's score.
+- **5 uploads in total. 2 used (v01, v03), 3 left.** v04 has not been uploaded yet.
+- With only 3 left, diagnostic probes are too expensive: every remaining upload should be a real candidate for the final score. So the France probe (§8-A.2) is dropped, and we decide based on local validation and v04's result.
+- **Suggested use:** upload v04 now; use one upload for the best improvement tomorrow; keep the last one for the final version on 27 Sep.
 
 ## 10. How to run
 
