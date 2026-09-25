@@ -1,7 +1,7 @@
 # Genovate: Amazon ML Challenge 2026, project status
 
 **Team:** Hemanth Raj, Kushal K V, Ayush Khanuja
-**Status as of:** 25 Sep 2026, 22:20 IST
+**Status as of:** 26 Sep 2026, about 00:30 IST (paused; see §7)
 **Deadline:** 27 Sep 2026, 23:59 IST. Target the final upload by about 20:00 IST on 27 Sep.
 **Best public leaderboard score:** 0.976736 (v03). **v04 is ready but not yet uploaded** (best local score so far). **Uploads: 2 of 5 used, 3 left.** The current #1 is 0.9859.
 
@@ -164,17 +164,24 @@ v04 is the first version whose improvement is visible *on test itself*, not only
 - **Pending decision on feedback item 8** (learning maps from confident test predictions): this is pseudo-labeling on test, so we have asked the organizers via the query form. It will not be used until they answer.
 - **Upload budget confirmed: 5 in total, 2 used, 3 left.** No diagnostic probes; every upload must be a real candidate.
 
-## 7. In progress right now
+## 7. Where we paused (resume here)
 
-- **v05 (robust) is ready:** [submissions/v05_candidate/matching_results.tsv](submissions/v05_candidate/matching_results.tsv), validator PASS, tag `v05`.
-  - It is 0.0006 below v04 locally, but its features are far less shifted: the stage-2 design's adversarial AUC is US 0.877 and India 0.825, against about 0.99 for v04.
-  - Test uncertain share: France 7.4%, India 4.0%, US 4.6%.
-  - Recommended as upload #3, because it is the version whose local score should best predict test, and it directly tests the shift diagnosis.
-- **Overnight rebuild `r2` is running** (`work/r2_log.txt`, model folder `model_tl_r2`, about 1.5 h). It adds:
-  - **Size-scaled blocking caps:** each cap is multiplied by (S1 partition size / 1M), so key selection depends on relative frequency and candidate sets are comparable between train and test.
-  - The hyphen fix (only purely alphabetic words are split) and French elision (l', d').
-  - Re-learned maps, re-blocking, new features, then the robust stage 1 and stage 2.
-  - It is the candidate for upload #4 if it beats v05 locally and on the adversarial check.
+**Paused at 26 Sep, about 00:30 IST, at the team's request.** No new jobs are to be started until we resume.
+
+1. **Still running when paused: the overnight rebuild `r2`** (`work/r2_log.txt`, model folder `model_tl_r2`, git commit `d75657f`).
+   - It adds size-scaled blocking caps, the hyphen fix and French elision, then retrains the robust stack.
+   - Blocking is done: train pair recall **0.98439**, oracle 0.99518 (the hyphen fix recovered most of v04's small loss).
+   - It then builds features, runs stage 1, stage 2 and prediction, and **writes `output/`**. v04 and v05 are archived separately, so they are safe.
+   - On resume, read the end of `work/r2_log.txt` for the scores and the validator result.
+2. **Open decision: which version is upload #3.**
+   - Local numbers favor **v04** (0.98550 vs 0.98486).
+   - The argument for **v05** is that its features are far less shifted (adversarial AUC about 0.85 vs 0.99). That is not yet a measurement.
+3. **First thing to run on resume: `sizeshift.py`** (written and committed, not yet run; about 1 hour).
+   - It builds a train "mini world" at test's sizes (US S1 at 50%, India at 92%, 41% decoys), re-blocks it with the original caps, and scores v04 and v05 out-of-fold.
+   - Whichever degrades less under the size shift is the evidence-based choice for upload #3.
+   - Also score r2 the same way once it has finished.
+4. **Uploads: 2 of 5 used, 3 left.** Nothing uploaded since v03 (0.976736).
+5. **Organizers' answer on item 8** (learning maps from confident test predictions) is pending. Don't use it until they approve.
 
 ## 8. What is left to build (prioritized)
 
