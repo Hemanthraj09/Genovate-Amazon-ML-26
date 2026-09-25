@@ -34,7 +34,14 @@ STOP_NAME = {"and", "&", "of", "+", "|", "-", "le", "la", "les", "du", "de", "de
              "et", "l", "d"}
 # Generic words the noise generator appends; dropped only in the "strict" core.
 GENERIC = {"center", "centre", "services", "service", "partners", "group", "co",
-           "company", "holdings", "india", "france", "usa", "us"}
+           "company", "holdings", "holding", "india", "france", "usa", "us",
+           "participations", "distribution", "groupe", "international", "intl",
+           "developpement", "trading", "enterprises"}
+# Name-word abbreviations -> canonical (applied to every record).
+NAME_ABBR = {"etablissements": "ets", "etabl": "ets", "compagnie": "cie", "freres": "frs",
+             "brothers": "bros", "associates": "assoc", "associes": "assoc",
+             "international": "intl", "manufacturing": "mfg", "mfrs": "mfg",
+             "technologies": "tech", "technology": "tech", "saint": "st", "sainte": "ste"}
 DBA_RE = re.compile(
     r"\b(?:doing business as|d\.b\.a\.?|d/b/a|dba:?|f/k/a|fka|formerly known as|"
     r"formerly|a/k/a|aka|trading as|t/a)(?=\s|$|:)", re.I)
@@ -70,9 +77,17 @@ MAPS = {"addr_tok": {}, "addr_comp": {}, "indic_word": {}}
 
 
 def load_maps(path):
-    """Load the maps learned from training pairs (see learn_maps.py)."""
+    """Load the maps learned from training pairs (see learn_maps.py).
+
+    Also derives a country-independent map of learned street-type typos
+    (e.g. 'aveue' -> 'ave'): the noise generator applies the same typo
+    process everywhere, so these are safe for countries unseen in training.
+    """
     with open(path, encoding="utf-8") as f:
         MAPS.update(json.load(f))
+    canon = set(ADDR_ABBR.values())
+    MAPS["addr_tok_global"] = {x: y for m in MAPS["addr_tok"].values()
+                               for x, y in m.items() if y in canon}
 
 
 # ------------------------------------------------------ transliteration
@@ -223,7 +238,8 @@ def _name_tokens(s):
         t = t.strip("-/#@")
         if not t:
             continue
-        toks.append(fix_leet(t))
+        t = fix_leet(t)
+        toks.append(NAME_ABBR.get(t, t))
     return toks
 
 
@@ -310,8 +326,9 @@ def _addr_basic_components(raw):
 
 def _addr_comp_tokens(comp):
     """Tokenize one address component with the hand-written abbreviation map."""
+    comp = re.sub(r"\bn\s*[°º]\s*", " ", comp)          # N° 5 / n°5
     comp = re.sub(r"[#()\[\]\"*]", " ", comp)
-    comp = comp.replace(".", " ").replace("&", " and ")
+    comp = comp.replace(".", " ").replace("&", " and ").replace("-", " ")
     out = []
     for t in comp.split():
         t = t.strip("-/'")
@@ -343,6 +360,7 @@ def norm_address(raw, country=""):
         return {"ad": "", "ad_nums": "", "ad_hn": "", "ad_unit": ""}
     cm = MAPS["addr_comp"].get(country, {})
     tm = MAPS["addr_tok"].get(country, {})
+    gm = MAPS.get("addr_tok_global", {})
     toks, unit = [], []
     for comp in _addr_basic_components(raw):
         c2 = comp.replace(".", "").strip()
@@ -350,7 +368,7 @@ def norm_address(raw, country=""):
         if not ct:
             continue
         key = " ".join(ct)
-        ct = cm[key].split() if key in cm else [tm.get(t, t) for t in ct]
+        ct = cm[key].split() if key in cm else [tm.get(t, gm.get(t, t)) for t in ct]
         if not ct:
             continue
         if POBOX_RE.match(c2) or ct[0] in ("unit", "pmb", "box"):

@@ -13,17 +13,26 @@ import output as O
 import train as TR
 
 
-def main(rule=None):
-    """Predict on test and write output/ files using the tuned decision rule."""
+def main(stage=1, rule=None):
+    """Predict on test and write output/ files using the tuned decision rule.
+
+    stage=1: stage-1 fold-average probabilities; stage=2: stage-2 re-scoring
+    (requires stage2.fit_predict_oof() to have been run).
+    """
     models = TR.load_models()
     pairs = TR.predict_split(models, "test")
     pairs.write_parquet(C.work("model", "test_pred.parquet"))
-    with open(C.work("model", "decision.json")) as f:
+    name = "oof"
+    if stage == 2:
+        import stage2
+        pairs = stage2.predict_test()
+        name = "oof2"
+    with open(C.work("model", f"decision_{name}.json")) as f:
         dec = json.load(f)
-    rule = rule or dec.get("rule", "threshold")
+    rule = rule or dec["rule"]
     assigned = D.assign_argmax(pairs)
     if rule == "ef_iso":
-        with open(C.work("model", "isotonic.pkl"), "rb") as f:
+        with open(C.work("model", f"isotonic_{name}.pkl"), "rb") as f:
             iso = pickle.load(f)
         import tune
         matches = D.by_expected_f(tune.calibrate(assigned, iso))
@@ -31,10 +40,11 @@ def main(rule=None):
         matches = D.by_expected_f(assigned)
     else:
         matches = D.by_threshold(assigned, dec["tau"])
-    print(f"rule={rule}: {matches.height:,} matched pairs over {matches['s1'].n_unique():,} S1 entities")
+    print(f"stage={stage} rule={rule}: {matches.height:,} matched pairs over "
+          f"{matches['s1'].n_unique():,} S1 entities")
     return O.write(matches, pairs.select("s1", "qid"), split="test")
 
 
 if __name__ == "__main__":
     import sys
-    main(sys.argv[1] if len(sys.argv) > 1 else None)
+    main(int(sys.argv[1]) if len(sys.argv) > 1 else 1, sys.argv[2] if len(sys.argv) > 2 else None)

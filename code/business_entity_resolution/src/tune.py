@@ -16,9 +16,9 @@ import decide as D
 import evaluate as E
 
 
-def load_oof():
+def load_oof(name="oof"):
     """OOF pair probabilities and the evaluation universe."""
-    oof = pl.read_parquet(C.work("model", "oof.parquet"))
+    oof = pl.read_parquet(C.work("model", f"{name}.parquet"))
     s1 = pl.read_parquet(C.work("raw", "train_s1.parquet")).select("idx", "country")
     truth = B.true_pairs()
     return oof, s1, truth
@@ -46,8 +46,9 @@ def report(pred, truth, s1, label):
     return score
 
 
-def main():
-    oof, s1, truth = load_oof()
+def main(name="oof"):
+    """Tune the decision rule on OOF predictions `model/{name}.parquet`."""
+    oof, s1, truth = load_oof(name)
     assigned = D.assign_argmax(oof)
     print(f"OOF pairs {oof.height:,}; assigned {assigned.height:,}")
     best = (None, -1)
@@ -59,14 +60,17 @@ def main():
     iso = fit_calibrator(assigned)
     sc_ef = report(D.by_expected_f(calibrate(assigned, iso)), truth, s1, "argmax + isotonic + expected-F")
     raw_ef = report(D.by_expected_f(assigned), truth, s1, "argmax + raw p + expected-F")
-    dec = {"tau": best[0], "tau_score": best[1], "ef_iso_score": sc_ef, "ef_raw_score": raw_ef}
-    with open(C.work("model", "decision.json"), "w") as f:
+    dec = {"tau": best[0], "threshold": best[1], "ef_iso": sc_ef, "ef_raw": raw_ef}
+    dec["rule"] = max(("threshold", "ef_iso", "ef_raw"), key=lambda r: dec[r])
+    with open(C.work("model", f"decision_{name}.json"), "w") as f:
         json.dump(dec, f, indent=1)
     import pickle
-    with open(C.work("model", "isotonic.pkl"), "wb") as f:
+    with open(C.work("model", f"isotonic_{name}.pkl"), "wb") as f:
         pickle.dump(iso, f)
     print(dec)
+    return dec
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(sys.argv[1] if len(sys.argv) > 1 else "oof")

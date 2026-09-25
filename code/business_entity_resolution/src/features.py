@@ -169,7 +169,7 @@ def chunk_features(p, mats):
     return pl.concat([e, out], how="horizontal")
 
 
-def build(split, topk=6, rel=0.3, tag=None):
+def build(split, topk=12, rel=0.3, tag=None):
     """Compute features for all pruned candidates of a split; save parquet."""
     t0 = time.time()
     cand = pl.read_parquet(C.work("cand", f"{split}.parquet"))

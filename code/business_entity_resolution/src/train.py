@@ -20,7 +20,7 @@ import config as C
 import blocking as B
 
 NFOLD = 2
-TRAIN_FRAC = 0.35          # share of each training fold's clusters used for fitting
+TRAIN_FRAC = 0.6           # share of each training fold's clusters used for fitting
 ID_COLS = ("qid", "s1")
 PARAMS = dict(objective="binary", learning_rate=0.08, num_leaves=255, min_data_in_leaf=200,
               feature_fraction=0.8, bagging_fraction=0.8, bagging_freq=1, lambda_l2=1.0,
