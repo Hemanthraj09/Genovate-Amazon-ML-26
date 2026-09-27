@@ -4,6 +4,9 @@ context/
 # Large intermediates and outputs
 work/
 output/
+# experiment output folders (hundreds of MB of TSVs each)
+output_*/
+*.tsv
 submissions/**/*.tsv
 submissions/**/*.zip
 *.parquet
