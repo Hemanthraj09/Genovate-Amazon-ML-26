@@ -1,0 +1,17 @@
+{
+ "tau": 0.7,
+ "threshold": 0.9903487521334506,
+ "ef_raw": 0.9904388328466763,
+ "ef_iso": 0.9904164816250588,
+ "ef_iso_pc": 0.9904232698067775,
+ "ef_iso_pc_prior": 0.9904011359225242,
+ "ef_raw_miss": 0.9904410256408764,
+ "rule": "ef_raw_miss",
+ "per_country": false,
+ "use_prior": false,
+ "use_miss": true,
+ "miss": {
+  "India": 0.021076023630185882,
+  "US": 0.01626473878380984
+ }
+}
