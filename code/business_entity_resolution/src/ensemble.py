@@ -49,7 +49,8 @@ def local_check(tags):
 
 
 def main(out, tags):
-    local_check(tags)
+    if os.environ.get("BER_SKIP_LOCAL") != "1":    # informational; loads every OOF
+        local_check(tags)
     parts = [load(t, "test_pred2").select("qid", "s1", pl.col("p").alias(t)) for t in tags]
     j = parts[0]
     for p in parts[1:]:
@@ -62,6 +63,15 @@ def main(out, tags):
           f"{j.drop_nulls(tags).height:,}, per build {[p.height for p in parts]}")
     pairs = j.select("qid", "s1", pl.mean_horizontal(pl.col(t) for t in tags).alias("p"))
     pairs = pairs.filter(pl.col("p").is_not_null())
+    # optional cross-encoder blend (ce.py / ce_blend.py): on the uncertain pairs,
+    # logit(p) <- a*logit(p) + b*ce + c, with a, b, c tuned on held-out entities
+    ce_tag = os.environ.get("BER_CE")
+    if ce_tag:
+        import ce_blend
+        coef = json.load(open(C.work("ce", f"blend_{ce_tag}.json")))
+        ce = pl.read_parquet(C.work("ce", f"test_ce_{ce_tag}.parquet"))
+        pairs = ce_blend.apply(pairs.join(ce, on=["qid", "s1"], how="left"), coef).select("qid", "s1", "p")
+        print(f"cross-encoder blend ({ce_tag}): {ce.height:,} pairs re-scored, held-out gain {coef['gain']:+.5f}")
 
     dec = json.load(open(C.work(tags[0], "decision_oof2.json")))
     blob = pickle.load(open(C.work(tags[0], "isotonic_oof2.pkl"), "rb"))
