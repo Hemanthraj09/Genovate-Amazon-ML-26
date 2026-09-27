@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary
 
-We generate candidates with IDF-weighted multi-key blocking, then score each (Source 2/3 record, Source 1 entity) pair with a two-stage LightGBM matcher. Stage 1 uses 56 pairwise string features. Stage 2 adds 28 context features computed from the stage-1 probabilities of competing pairs. Each record is assigned to its best entity, and each entity's match set is chosen by maximising the *exact* expected F0.5.
+We generate candidates with IDF-weighted multi-key blocking, then score each (Source 2/3 record, Source 1 entity) pair with a two-stage LightGBM matcher. On the pairs the trees are unsure about, a small pretrained multilingual cross-encoder (multilingual-e5-small, MIT, 118M parameters, fine-tuned on a laptop GPU) adds a second opinion. Stage 1 uses 56 pairwise string features. Stage 2 adds 28 context features computed from the stage-1 probabilities of competing pairs. Each record is assigned to its best entity, and each entity's match set is chosen by maximising the *exact* expected F0.5.
 
 Our main technical contribution is a validation world that behaves like the test set, plus three measured findings about how test differs from train:
 
@@ -36,12 +36,13 @@ We correct for each of these. We also found and fixed an out-of-fold leak in our
 
 ### 2.2 Solution Strategy
 
-**Approach Type:** Blocking + two-stage gradient-boosted classifier + exact expected-F0.5 decision layer.
+**Approach Type:** Hybrid. Blocking, then a two-stage gradient-boosted classifier, then a fine-tuned transformer cross-encoder on uncertain pairs, then an exact expected-F0.5 decision layer.
 
 **Core Innovation:**
 1. A **test-shaped validation world**. Each country's S1 is cut to test's size *before* blocking. Decoys are sampled to test's decoy share, with natural look-alikes preferred over orphans. Several such worlds are drawn with different hash seeds, and each gives a strong, diverse model for the ensemble.
 2. An **exact expected-F0.5 subset selector** per entity. It uses a Poisson-binomial dynamic program over the entity's assigned records and a Poisson term for true matches that never reached the candidate set.
 3. A **test-decoy-density correction**: every pair's odds are multiplied by a constant before selection, because test carries about twice the look-alike decoys the model trained with.
+4. A **cross-encoder on the uncertain band**. multilingual-e5-small reads the raw name and address of both records together. It is fine-tuned on the 1.4M training pairs whose tree probability lies in (0.01, 0.99), using two entity halves so every training pair gets an honest score. A logistic blend with the tree logit, tuned on held-out entities, lifts honest macro F0.5 from 0.98634 to 0.98892.
 
 ---
 
@@ -75,7 +76,7 @@ Blocking searches from each S2/S3 record ("query") into the S1 records of the sa
 - *entity side:* probability mass, confident count, best competing record, rank, how many records choose this entity
 - *sibling agreement:* how many other confident candidates of the entity share this record's house number, name or address, or carry the entity's own values. A deviation shared by siblings signals a systematic source format; a name deviation shared by siblings signals a look-alike decoy entity.
 
-**Model type:** LightGBM binary classifiers (MIT licence, far under 8B parameters). There are 4 folds grouped by query cluster, so all records of one entity share a fold. Each fold model trains on 67.5% of clusters. The final submission averages several model sets trained on different validation worlds and seeds.
+**Model type:** LightGBM binary classifiers (MIT), plus a fine-tuned cross-encoder, intfloat/multilingual-e5-small (MIT, 118M parameters). Both are far under the 8B limit. There are 4 folds grouped by query cluster, so all records of one entity share a fold. Each fold model trains on 67.5% of clusters. The final submission averages several model sets trained on different validation worlds and seeds.
 
 **Threshold selection method:**
 - Each record keeps only its best-scoring entity.
@@ -88,7 +89,16 @@ Blocking searches from each S2/S3 record ("query") into the S1 records of the sa
 
 ## 5. Results & Error Analysis
 
-- **F_0.5 Score (macro):** TBD (honest local validation, after the OOF fix below). Public leaderboard: see the table below.
+- **F_0.5 Score (macro), honest local validation** (held-out entity halves, out-of-fold, after the leak fix below):
+
+  | Model | Local F0.5 |
+  |---|---|
+  | honest v4b, stage 2 | 0.98634 |
+  | honest world-1 model | 0.98645 |
+  | anchored world | 0.98785 |
+  | v4b + cross-encoder blend | **0.98892** |
+
+  Under a simulation of test's decoy density, the blend scores 0.98613 against 0.98207 for the trees alone. Public leaderboard: see the table below.
 - **Common false positives (wrong merges):** near-twin decoys, meaning the same name with a house number one or two digits off (`c-115` vs `c-108`), or the same address with a different or generated name. Singletons attacked by look-alikes cost a full point each.
 - **Common false negatives (missed matches):** true copies with an empty address whose name is generic (shared by 12 to 1,000 entities, so they are genuinely ambiguous), and true copies whose house number was perturbed by the generator.
 
@@ -101,7 +111,8 @@ Blocking searches from each S2/S3 record ("query") into the S1 records of the sa
 | v4 | more training data per fold model (67.5% of clusters) | 0.97913 |
 | v4 + v4b, odds × 0.5 | ensemble of two seeds and tree shapes + decoy-density correction | 0.979992 |
 | same, odds × 0.35 | stronger correction | 0.980005 |
-| TBD | honest OOF (leak fixed), 3-model ensemble | TBD |
+| v4bh | honest OOF (leak fixed), single model, odds × 0.35 | 0.979403 |
+| ens5 + CE | v4, v4b, v4bh, w1h, aw3 + cross-encoder blend, odds × 0.35 | TBD |
 
 **Out-of-fold leak we found and fixed.** For a while, fold-k rows were scored by the average of the models j ≠ k. Model j trains on every fold except j, so those were exactly the models that had seen fold k, and model k was the only honest one. This inflated local scores (v4b: 0.99044 leaked vs about 0.988 honest). It also trained stage 2 on over-confident stage-1 scores, which is a mismatch with test, where stage-1 scores are honest. The fix scores fold k with model k at both stages. The stage-1 models themselves were unaffected, so we rebuilt stage 2 and all tuning on honest OOF without retraining stage 1.
 
@@ -130,7 +141,9 @@ Most of the achievable accuracy came from making validation look like test: the 
 | decision-rule tuning on OOF | `tune.py` |
 | stage-2 context model | `stage2.py` |
 | test prediction and decision | `predict.py`, `decide.py` |
-| multi-model average and final decision | `ensemble.py` |
+| multi-model average, cross-encoder blend and final decision | `ensemble.py` |
+| cross-encoder (GPU) and its blend | `ce.py`, `ce_blend.py` |
+| submission zip in the required layout, validated | `make_submission_zip.py` (repo root) |
 | submission writer | `output.py` |
 | exact metric with the worked example as a self-test | `evaluate.py` |
 

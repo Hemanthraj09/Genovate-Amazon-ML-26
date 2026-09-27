@@ -1,3 +1,4 @@
+# Core pipeline (CPU): blocking, features, LightGBM stages, decision, output
 joblib==1.5.3
 lightgbm==4.7.0
 numpy==2.4.6
@@ -8,3 +9,12 @@ RapidFuzz==3.14.6
 scikit-learn==1.8.0
 scipy==1.17.1
 threadpoolctl==3.6.0
+
+# Cross-encoder stage (ce.py; NVIDIA GPU, CUDA 12.8). torch comes from the PyTorch index:
+#   pip install torch==2.11.0 --index-url https://download.pytorch.org/whl/cu128
+# Model weights: intfloat/multilingual-e5-small (MIT licence, 118M parameters)
+torch==2.11.0
+transformers==5.17.0
+tokenizers==0.23.2
+safetensors==0.8.0
+huggingface_hub==1.33.0

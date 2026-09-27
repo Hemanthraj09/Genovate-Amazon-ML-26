@@ -11,6 +11,7 @@ saw that half, and the blend is scored on entities it was not fitted on.
 Writes WORK_DIR/ce/blend_<tag>.json with the coefficients refitted on all pairs.
 """
 import json
+import os
 import numpy as np
 import polars as pl
 from sklearn.linear_model import LogisticRegression
@@ -35,9 +36,21 @@ def apply(df, coef):
     return df.with_columns(pl.when(pl.col("ce").is_not_null()).then(pl.Series(pb)).otherwise(pl.col("p")).alias("p"))
 
 
+def average(paths):
+    """Mean cross-encoder logit over several runs (pairs present in all)."""
+    fr = [pl.read_parquet(p).rename({"ce": f"ce{i}"}) for i, p in enumerate(paths)]
+    j = fr[0]
+    for f in fr[1:]:
+        j = j.join(f, on=["qid", "s1"])
+    return j.select("qid", "s1", pl.mean_horizontal([f"ce{i}" for i in range(len(fr))]).alias("ce"))
+
+
 def main():
     oof, s1, truth = tune.load_oof("oof2")
-    ce = pl.read_parquet(C.work("ce", f"oof_ce_{C.MODEL_TAG}.parquet"))
+    # BER_CE_RUNS="" or ",b": average the out-of-half logits of several ce.py runs
+    runs = os.environ.get("BER_CE_RUNS", "").split(",")
+    outname = C.MODEL_TAG + ("_" + "".join(r or "a" for r in runs) if len(runs) > 1 else "")
+    ce = average([C.work("ce", f"oof_ce_{C.MODEL_TAG}{r}.parquet") for r in runs])
     dec = json.load(open(C.work(C.MODEL_DIR, "decision_oof2.json")))
     miss = dec["miss"] if dec.get("use_miss") else None
     a = D.assign_argmax(oof).join(s1.rename({"idx": "s1"}), on="s1", how="left")
@@ -62,7 +75,9 @@ def main():
     lr = LogisticRegression(C=1.0, max_iter=200).fit(design(band), band["y"].to_numpy())
     coef = {"a": float(lr.coef_[0][0]), "b": float(lr.coef_[0][1]), "c": float(lr.intercept_[0]),
             "gain": (tot["blend"] - tot["tree"]) / n}
-    json.dump(coef, open(C.work("ce", f"blend_{C.MODEL_TAG}.json"), "w"), indent=1)
+    json.dump(coef, open(C.work("ce", f"blend_{outname}.json"), "w"), indent=1)
+    if len(runs) > 1:     # the matching test file for ensemble.py BER_CE=<outname>
+        average([C.work("ce", f"test_ce_{C.MODEL_TAG}{r}.parquet") for r in runs]).write_parquet(C.work("ce", f"test_ce_{outname}.parquet"))
     print("saved", coef)
 
 

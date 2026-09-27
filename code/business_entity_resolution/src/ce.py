@@ -30,6 +30,7 @@ MAX_LEN = 96
 BATCH = 64
 LR = 5e-5
 MAX_TRAIN = int(os.environ.get("BER_CE_MAX_TRAIN", "350000"))   # pairs per half
+RUN = os.environ.get("BER_CE_RUN", "")      # a second run ("b") uses other seeds and file names
 
 
 def band(tag, split):
@@ -146,8 +147,8 @@ def main(mdir):
     te = pl.read_parquet(out / f"band_test_{C.MODEL_TAG}.parquet")
     print(f"band pairs: train {tr.height:,}  test {te.height:,} ({time.time() - t0:.0f}s)", flush=True)
     half = (pl.col("fold") >= 2)
-    for h, seed in ((0, 11), (1, 12)):
-        done = out / f"half{h}_{C.MODEL_TAG}.parquet"
+    for h, seed in ((0, 11 + 100 * len(RUN)), (1, 12 + 100 * len(RUN))):
+        done = out / f"half{h}_{C.MODEL_TAG}{RUN}.parquet"
         if done.exists():                    # resume: each half is saved as it finishes
             print(f"half {h}: already done", flush=True)
             continue
@@ -159,12 +160,12 @@ def main(mdir):
         pl.concat([o.with_columns(pl.lit("oof").alias("kind")), t.with_columns(pl.lit("test").alias("kind"))]).write_parquet(done)
         print(f"half {h} done ({time.time() - t0:.0f}s)", flush=True)
         del m; torch.cuda.empty_cache()
-    hs = [pl.read_parquet(out / f"half{h}_{C.MODEL_TAG}.parquet") for h in (0, 1)]
-    pl.concat([x.filter(pl.col("kind") == "oof") for x in hs]).drop("kind").write_parquet(out / f"oof_ce_{C.MODEL_TAG}.parquet")
+    hs = [pl.read_parquet(out / f"half{h}_{C.MODEL_TAG}{RUN}.parquet") for h in (0, 1)]
+    pl.concat([x.filter(pl.col("kind") == "oof") for x in hs]).drop("kind").write_parquet(out / f"oof_ce_{C.MODEL_TAG}{RUN}.parquet")
     t = (hs[0].filter(pl.col("kind") == "test").drop("kind")
            .join(hs[1].filter(pl.col("kind") == "test").drop("kind"), on=["qid", "s1"], suffix="_b")
            .select("qid", "s1", ((pl.col("ce") + pl.col("ce_b")) / 2).alias("ce")))
-    t.write_parquet(out / f"test_ce_{C.MODEL_TAG}.parquet")
+    t.write_parquet(out / f"test_ce_{C.MODEL_TAG}{RUN}.parquet")
     print(f"saved ({time.time() - t0:.0f}s)", flush=True)
 
 
