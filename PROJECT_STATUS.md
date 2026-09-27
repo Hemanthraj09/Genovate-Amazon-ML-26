@@ -1,7 +1,7 @@
 # Genovate: Amazon ML Challenge 2026, project status
 
 **Team:** Hemanth Raj, Kushal K V, Ayush Khanuja
-**Status as of:** 27 Sep 2026, ~15:30 IST. Builds are running (§7). Code is committed and pushed to GitHub (§9).
+**Status as of:** 27 Sep 2026, ~18:05 IST. **The final candidate and the submission zip are built and validated** (§7). Nothing is running. Code is pushed to GitHub (§9).
 **Deadline:** 27 Sep 2026, 23:59 IST. Final upload target: ~20:00 IST. Documentation and zip frozen by ~21:00.
 **Uploads:** 5 per day; the leaderboard keeps each team's **maximum** score. Today: **3 used, 2 left**.
 **Best public leaderboard score:** **0.980005** (v4 + v4b ensemble, odds × 0.35; `output_ens_o035/`). The top 60 teams are at ≥ 0.99.
@@ -124,32 +124,34 @@ The France-empty probe splits the leaderboard into **US+India ≈ 0.982** and **
 
 ---
 
-## 7. Running now (27 Sep, ~15:30)
+## 7. Final candidate (27 Sep, 18:05)
 
-**Honest local results so far** (stage 2, expected-F rule, held-out entity halves):
+**`output_final/`** (archived in `submissions/final_candidate/`). Validator PASS. **`Genovate_submission.zip`** is built from it: 43 files, 205.5 MB, and the zipped TSVs pass the validator.
 
-| Model set | World | Local F0.5 |
-|---|---|---|
-| v4bh | original world, honest OOF | 0.98634 |
-| w1h | world 1, honest OOF | 0.98645 |
-| **aw3** | **anchored world 3** (only decoys that imitate kept entities) | **0.98785** |
+The recipe:
+1. **Members:** the mean of five stage-2 model sets: `v4bh`, `aw3`, `w1h`, `v4b`, `v4`.
+2. **Cross-encoder blend:** on the 2.27M uncertain test pairs, using both e5-small runs averaged.
+3. **Decision:** odds × 0.35, then the expected-F0.5 set per S1 entity.
 
-Stage 1 alone for aw3 scored 0.98354. Each world has a different decoy mix, so the scores are indicative rather than directly comparable.
+**Honest local results** (stage 2, held-out entity halves):
 
-| Resource | Job | ETA |
-|---|---|---|
-| CPU | aw3: test prediction (`work/aw3_build.log`) | ~15:35 |
-| GPU | cross-encoder on v4bh's uncertain pairs (`ce.py`). It starts automatically once aw3 finishes, because the two can't share 16 GB. Its first three attempts ran out of memory next to the CPU jobs | ~16:40 |
-| deferred | honest v4 and the stage-2 variants. Paused with `work/SKIP_v4` and `work/SKIP_s2var`; delete a file to re-enable that step | if time allows |
-
-Ready but not uploaded:
-
-| Folder | Contents |
+| Model | Local F0.5 |
 |---|---|
-| `output_v4b_h/` | honest v4b, stage-2 rule only (no odds) |
-| `output_w1_h/` | honest w1, stage-2 rule only |
-| `output_ens_o1/` | leaked v4 + v4b, no odds |
-| `output_v4b_o50/` | leaked v4b alone, × 0.5 |
+| v4bh | 0.98634 |
+| w1h (world 1) | 0.98645 |
+| aw3 (anchored world 3) | 0.98785 |
+| v4bh + cross-encoder blend, run a | 0.98892 |
+| v4bh + cross-encoder blend, runs a+b averaged | **0.98899** |
+
+In a simulation of test's decoy density, the blend's best odds are × 0.35. There it scores 0.98613, against 0.98207 for the trees alone.
+
+Other built candidates (validator PASS):
+
+| Folder | What |
+|---|---|
+| `output_ens5ce_o035` | same recipe with cross-encoder run a only |
+| `output_ens5ce_o030` | run a only, odds × 0.3 |
+| `output_ens5_o030` | the five model sets without the cross-encoder, odds × 0.3 |
 
 ## 8. Plan for the rest of the day
 
