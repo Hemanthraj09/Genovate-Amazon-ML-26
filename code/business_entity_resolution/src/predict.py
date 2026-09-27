@@ -5,6 +5,7 @@ blocking output, i.e. exactly the rows of the test feature files).
 matching_results.tsv = the decided subset.
 """
 import json
+import os
 import pickle
 import polars as pl
 import config as C
@@ -19,9 +20,13 @@ def main(stage=1, rule=None):
     stage=1: stage-1 fold-average probabilities; stage=2: stage-2 re-scoring
     (requires stage2.fit_predict_oof() to have been run).
     """
-    models = TR.load_models()
-    pairs = TR.predict_split(models, "test")
-    pairs.write_parquet(C.work(C.MODEL_DIR, "test_pred.parquet"))
+    if os.environ.get("BER_S1_FROM_FILE"):
+        # stacked model sets (stack.py) have no stage-1 models of their own
+        pairs = pl.read_parquet(C.work(C.MODEL_DIR, "test_pred.parquet"))
+    else:
+        models = TR.load_models()
+        pairs = TR.predict_split(models, "test")
+        pairs.write_parquet(C.work(C.MODEL_DIR, "test_pred.parquet"))
     name = "oof"
     if stage >= 2:
         import stage2
@@ -32,13 +37,22 @@ def main(stage=1, rule=None):
         dec = json.load(f)
     rule = rule or dec["rule"]
     assigned = D.assign_argmax(pairs)
-    if rule == "ef_iso":
+    if rule.startswith("ef"):
+        # the country label only routes calibration and is never a model feature;
+        # a country with no calibrator of its own (France) falls back to pooled
+        s1c = (pl.read_parquet(C.work("raw", "test_s1.parquet"))
+                 .select(pl.col("idx").alias("s1"), "country"))
+        assigned = assigned.join(s1c, on="s1", how="left")
+    if rule.startswith("ef_iso"):
         with open(C.work(C.MODEL_DIR, f"isotonic_{name}.pkl"), "rb") as f:
-            iso = pickle.load(f)
+            blob = pickle.load(f)
         import tune
-        matches = D.by_expected_f(tune.calibrate(assigned, iso))
-    elif rule == "ef_raw":
-        matches = D.by_expected_f(assigned)
+        assigned = tune.calibrate(assigned, blob["isos"], dec.get("per_country", False),
+                                  blob["prior"] if dec.get("use_prior") else None)
+    # test-decoy-density correction (see decide.shrink_odds); 1.0 = off
+    assigned = D.shrink_odds(assigned, D.parse_odds(os.environ.get("BER_ODDS")))
+    if rule.startswith("ef"):
+        matches = D.by_expected_f(assigned, miss_odds=dec["miss"] if dec.get("use_miss") else None)
     else:
         matches = D.by_threshold(assigned, dec["tau"])
     print(f"stage={stage} rule={rule}: {matches.height:,} matched pairs over "
