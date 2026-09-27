@@ -9,8 +9,8 @@ import os
 import sys
 import time
 
-# The final submission is trained with the test-like variant (see config.py).
-os.environ.setdefault("BER_VARIANT", "tl")
+# The final submission uses the corrected test-like variant "fix" (see config.py).
+os.environ.setdefault("BER_VARIANT", "fix")
 
 STEPS = ["prepare", "maps", "normalize", "blocking", "features", "train", "tune",
          "stage2", "tune2", "predict"]
@@ -29,9 +29,11 @@ def run(step):
         import blocking, config as C
         for split in ("train", "test"):
             cand = blocking.run(split)
-            cand.write_parquet(C.work("cand", f"{split}.parquet"))
+            cand.write_parquet(blocking.cand_path(split))
             if split == "train":
-                blocking.oracle_report(cand, label="train")
+                blocking.oracle_report(
+                    cand, s1_ids=blocking.kept_s1() if C.DROP_BEFORE_BLOCKING else None, label="train")
+            del cand
     elif step == "features":
         import features
         for split in ("train", "test"):

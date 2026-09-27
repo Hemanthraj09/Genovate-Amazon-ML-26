@@ -66,6 +66,7 @@ def block_and_featurize(s1m, qm):
         B.CAP_REF_N = s1c.height                 # scale = 1 -> original absolute caps
         cands.append(B.block_country(s1c, qc))
     cand = F.prune_candidates(pl.concat(cands), 12, 0.3)
+    s1m, qm = F.add_core_address(s1m, qm)
     s1t = s1m.with_row_index("srow")
     qt = qm.with_row_index("qrow")
     nm_f = s1t.group_by("country", "nm").agg(pl.len().alias("nm_freq"))
@@ -76,8 +77,8 @@ def block_and_featurize(s1m, qm):
     mats = {"nm_char_cos": F.tfidf_pair(s1t["nm"].to_list(), qt["nm"].to_list(), "char_wb", (3, 3)),
             "nm_word_cos": F.tfidf_pair(s1t["nm"].to_list(), qt["nm"].to_list(), "word", (1, 1)),
             "ad_word_cos": F.tfidf_pair(s1t["ad"].to_list(), qt["ad"].to_list(), "word", (1, 1))}
-    scols = ["idx", "srow", "nm", "nm_s", "nm_cmp", "nm_leg", "ad", "ad_nums", "ad_hn", "ad_unit", "nm_freq", "ad_freq"]
-    qcols = ["qid", "qrow", "nm", "nm_s", "nm_cmp", "nm_alt", "nm_leg", "flags", "ad", "ad_nums", "ad_hn",
+    scols = ["idx", "srow", "nm", "nm_s", "nm_cmp", "nm_leg", "ad", "ad_core", "ad_nums", "ad_hn", "ad_unit", "nm_freq", "ad_freq"]
+    qcols = ["qid", "qrow", "nm", "nm_s", "nm_cmp", "nm_alt", "nm_leg", "flags", "ad", "ad_core", "ad_nums", "ad_hn",
              "ad_unit", "q_nm_freq", "q_ad_freq"]
     s1c = s1t.select(scols).rename({c: c + "_1" for c in scols if c not in ("idx", "srow", "nm_freq", "ad_freq")})
     outs = []

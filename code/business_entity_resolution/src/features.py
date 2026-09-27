@@ -15,6 +15,7 @@ Feature groups
   ambiguity: how many S1 records share this name / address
 The country label is never a feature.
 """
+import os
 import time
 import numpy as np
 import polars as pl
@@ -58,7 +59,9 @@ def tfidf_pair(s1_texts, q_texts, analyzer, ngram):
     """L2-normalized TF-IDF matrices for S1 and query texts (shared IDF)."""
     texts = s1_texts + q_texts
     step = 400_000
-    mats = Parallel(n_jobs=C.N_THREADS)(
+    # fewer workers than threads: each loky worker commits its own copy of the
+    # chunk, and 22 of them exhausted the Windows commit limit (WinError 1450)
+    mats = Parallel(n_jobs=int(os.environ.get("BER_TFIDF_JOBS", "8")))(
         delayed(_hash_chunk)(texts[i:i + step], analyzer, ngram)
         for i in range(0, len(texts), step))
     X = sp.vstack(mats).tocsr()
@@ -77,14 +80,19 @@ def rowwise_cos(A, ia, Bm, ib):
 
 
 # ---------------------------------------------------------------- tables
-def load_tables(split, drop=None):
+def load_tables(split, drop=None, keep_q=None):
     """Normalized S1 / query tables with row positions and sharing counts.
 
-    `drop`: S1 ids to remove (test-like variant); their records stay as queries.
+    `drop`:   S1 ids to remove (test-like variants); their records stay as queries.
+    `keep_q`: query ids to retain (corrected variant, which subsamples decoys), so
+              the TF-IDF corpus and the S1 name/address frequencies are computed on
+              the same record population the model will be trained on.
     """
     s1, q = B.load_norm(split)
     if drop is not None and len(drop):
         s1 = s1.filter(~pl.col("idx").is_in(drop))
+    if keep_q is not None:
+        q = q.filter(pl.col("qid").is_in(keep_q))
     s1 = s1.with_row_index("srow")
     q = q.with_row_index("qrow")
     nm_f = s1.group_by("country", "nm").agg(pl.len().alias("nm_freq"))
@@ -94,6 +102,41 @@ def load_tables(split, drop=None):
     q = (q.join(nm_f.rename({"nm_freq": "q_nm_freq"}), on=["country", "nm"], how="left")
           .join(ad_f.rename({"ad_freq": "q_ad_freq"}), on=["country", "ad"], how="left")
           .fill_null(0))
+    return s1, q
+
+
+CORE_FRAC = 0.02      # address tokens above this share of a country's records are "common"
+
+
+def add_core_address(s1, q):
+    """Add `ad_core`: each address minus the tokens that are common in its country.
+
+    France S1 records carry a region name (Hauts-de-France 39%, Nouvelle-Aquitaine
+    33%, Pays de la Loire 28%) where their S2/S3 counterparts carry the department
+    instead (Nord 11%, Gironde 11%, Loire-Atlantique 9%) -- those tokens appear on
+    one side and essentially never on the other, so they only ever subtract from a
+    true pair's address similarity. US and India avoid this because the learned maps
+    canonicalise their state names; France has no maps because it is absent from
+    train. Dropping country-common tokens removes regions, departments, cities and
+    street types symmetrically from both sides, leaving the part of the address that
+    actually identifies the building. Digits are always kept.
+    """
+    both = pl.concat([s1.select(pl.lit(1, pl.UInt8).alias("side"), pl.col("idx").alias("id"), "country", "ad"),
+                      q.select(pl.lit(2, pl.UInt8).alias("side"), pl.col("qid").alias("id"), "country", "ad")])
+    n = both.group_by("country").agg(pl.len().alias("n"))
+    tok = (both.select("side", "id", "country", pl.col("ad").str.split(" ").alias("t"))
+               .explode("t").filter(pl.col("t") != ""))
+    common = (tok.unique(["side", "id", "t"]).group_by("country", "t").agg(pl.len().alias("df"))
+                 .join(n, on="country")
+                 .filter((pl.col("df") > CORE_FRAC * pl.col("n")) & ~pl.col("t").str.contains(r"[0-9]"))
+                 .select("country", "t"))
+    core = (tok.join(common, on=["country", "t"], how="anti")
+               .group_by("side", "id", maintain_order=True)
+               .agg(pl.col("t").str.join(" ").alias("ad_core")))
+    s1 = s1.join(core.filter(pl.col("side") == 1).select(pl.col("id").alias("idx"), "ad_core"),
+                 on="idx", how="left").with_columns(pl.col("ad_core").fill_null(""))
+    q = q.join(core.filter(pl.col("side") == 2).select(pl.col("id").alias("qid"), "ad_core"),
+               on="qid", how="left").with_columns(pl.col("ad_core").fill_null(""))
     return s1, q
 
 
@@ -122,6 +165,13 @@ def chunk_features(p, mats):
     f["ad_tset"] = _cp(aq, as_, fuzz.token_set_ratio)
     f["ad_tsort"] = _cp(aq, as_, fuzz.token_sort_ratio)
     f["ad_partial"] = _cp(aq, as_, fuzz.partial_ratio)
+    # same comparisons on the country-common-token-stripped address (see
+    # add_core_address): the only address signal France's region/department
+    # mismatch cannot corrupt
+    kq, ks = p["ad_core"].to_list(), p["ad_core_1"].to_list()
+    ok = ((p["ad_core"] != "") & (p["ad_core_1"] != "")).to_numpy()
+    for nm, sc in (("tset", fuzz.token_set_ratio), ("ratio", fuzz.ratio), ("partial", fuzz.partial_ratio)):
+        f[f"adk_{nm}"] = np.where(ok, _cp(kq, ks, sc), -1).astype(np.float32)
     # numeric near-twin features: noise usually costs one edit on the house
     # number (truncation / one digit), look-alike decoys usually differ more
     hq, hs = p["ad_hn"].to_list(), p["ad_hn_1"].to_list()
@@ -196,27 +246,37 @@ def chunk_features(p, mats):
 def build(split, topk=12, rel=0.3, tag=None):
     """Compute features for all pruned candidates of a split; save parquet."""
     t0 = time.time()
-    cand = pl.read_parquet(C.work("cand", f"{split}.parquet"))
+    cand = pl.read_parquet(B.cand_path(split))
     drop = B.dropped_s1() if split == "train" else None
-    if drop is not None and len(drop):
+    keep_q = None
+    if split == "train" and C.DROP_BEFORE_BLOCKING:
+        # blocking already excluded these entities and thinned the decoy queries,
+        # so the candidate lists are already test-shaped: do not touch them here
+        keep_q = cand["qid"].unique()
+        print(f"[{split}] corrected variant: {len(drop):,} S1 entities and the surplus "
+              f"decoy queries were excluded before blocking", flush=True)
+    elif drop is not None and len(drop):
         cand = (cand.filter(~pl.col("s1").is_in(drop))
                     .sort(["qid", "score"], descending=[False, True])
                     .with_columns(pl.int_range(1, pl.len() + 1).over("qid").cast(pl.UInt8).alias("rank")))
-        print(f"[{split}] test-like variant: dropped {len(drop):,} S1 entities", flush=True)
+        print(f"[{split}] legacy test-like variant: dropped {len(drop):,} S1 entities "
+              f"AFTER blocking (biases candidate counts, see feedback6.md)", flush=True)
     tag = tag or (C.TRAIN_TAG if split == "train" else split)
     cand = prune_candidates(cand, topk, rel)
     print(f"[{split}] pruned candidates: {cand.height:,} ({time.time() - t0:.0f}s)", flush=True)
-    s1, q = load_tables(split, drop)
+    s1, q = load_tables(split, drop, keep_q)
+    s1, q = add_core_address(s1, q)
+    print(f"[{split}] core addresses ready ({time.time() - t0:.0f}s)", flush=True)
     mats = {}
     # (address char n-grams are skipped: ~5 GB for 12M addresses; rapidfuzz covers them)
     mats["nm_char_cos"] = tfidf_pair(s1["nm"].to_list(), q["nm"].to_list(), "char_wb", (3, 3))
     mats["nm_word_cos"] = tfidf_pair(s1["nm"].to_list(), q["nm"].to_list(), "word", (1, 1))
     mats["ad_word_cos"] = tfidf_pair(s1["ad"].to_list(), q["ad"].to_list(), "word", (1, 1))
     print(f"[{split}] tf-idf ready ({time.time() - t0:.0f}s)", flush=True)
-    scols = ["idx", "srow", "nm", "nm_s", "nm_cmp", "nm_leg", "ad", "ad_nums", "ad_hn", "ad_unit",
-             "nm_freq", "ad_freq"]
-    qcols = ["qid", "qrow", "nm", "nm_s", "nm_cmp", "nm_alt", "nm_leg", "flags", "ad", "ad_nums",
-             "ad_hn", "ad_unit", "q_nm_freq", "q_ad_freq"]
+    scols = ["idx", "srow", "nm", "nm_s", "nm_cmp", "nm_leg", "ad", "ad_core", "ad_nums", "ad_hn",
+             "ad_unit", "nm_freq", "ad_freq"]
+    qcols = ["qid", "qrow", "nm", "nm_s", "nm_cmp", "nm_alt", "nm_leg", "flags", "ad", "ad_core",
+             "ad_nums", "ad_hn", "ad_unit", "q_nm_freq", "q_ad_freq"]
     s1t = s1.select(scols).rename({c: c + "_1" for c in scols if c not in ("idx", "srow", "nm_freq", "ad_freq")})
     qt = q.select(qcols)
     out_dir = C.work("feat", tag, "x").parent
