@@ -112,7 +112,11 @@ Blocking searches from each S2/S3 record ("query") into the S1 records of the sa
 | v4 + v4b, odds × 0.5 | ensemble of two seeds and tree shapes + decoy-density correction | 0.979992 |
 | same, odds × 0.35 | stronger correction | 0.980005 |
 | v4bh | honest OOF (leak fixed), single model, odds × 0.35 | 0.979403 |
-| ens5 + CE | v4, v4b, v4bh, w1h, aw3 + cross-encoder blend, odds × 0.35 | TBD |
+| ens5 | v4, v4b, v4bh, w1h, aw3; odds × 0.3; no cross-encoder | 0.98092 |
+| ens5 + CE (run a) | + cross-encoder blend, odds × 0.35 | 0.983899 |
+| ens5 + CE (runs a+b) | two cross-encoder runs averaged | 0.984006 |
+| France × 0.2 | same, France odds 0.2 | 0.983818 |
+| **France × 0.6 (final)** | same, France odds 0.6 | **0.984083** |
 
 **Out-of-fold leak we found and fixed.** For a while, fold-k rows were scored by the average of the models j ≠ k. Model j trains on every fold except j, so those were exactly the models that had seen fold k, and model k was the only honest one. This inflated local scores (v4b: 0.99044 leaked vs about 0.988 honest). It also trained stage 2 on over-confident stage-1 scores, which is a mismatch with test, where stage-1 scores are honest. The fix scores fold k with model k at both stages. The stage-1 models themselves were unaffected, so we rebuilt stage 2 and all tuning on honest OOF without retraining stage 1.
 
@@ -149,4 +153,5 @@ Most of the achievable accuracy came from making validation look like test: the 
 
 ### B. Additional Results
 
-TBD.
+- **The final uploaded file** (public LB 0.984083) is `output/matching_results.tsv` in this archive. `src/run_final.sh` regenerates it.
+- **Built but never uploaded (out of submissions):** a stronger cross-encoder trained on all ~690k training pairs per half. It scores 0.98932 held-out, against 0.98899 for the runs a+b blend used in the final file.

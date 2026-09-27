@@ -64,19 +64,19 @@ build v4bh   0     ""        1337  383    0.06  0.7  0           v4b
 build w1h    1     ""        2028  383    0.06  0.7  0
 build aw3    3     anchored  3033  383    0.06  0.7  0
 
-# ---- cross-encoder on v4bh's uncertain pairs (GPU): run c = all ~690k training
-#      pairs per entity half (held-out F0.5 0.98634 -> 0.98932), then its blend
+# ---- cross-encoder on v4bh's uncertain pairs (GPU): two runs (a, b) with different
+#      seeds, averaged, then the blend (held-out F0.5 0.98634 -> 0.98899)
 ( export BER_MODEL_TAG=v4bh
   step "cross-encoder: prepare pairs";  python -u ce.py prep
-  step "cross-encoder: run c";          BER_CE_RUN=c BER_CE_MAX_TRAIN=700000 "$CE_PYTHON" -u ce.py "$E5_DIR"
-  step "cross-encoder: blend";          BER_CE_RUNS=c python -u ce_blend.py
-  cp "$W/ce/blend_v4bh.json" "$W/ce/blend_v4bhc.json" )   # single-run blends are saved under the base tag
+  step "cross-encoder: run a";          "$CE_PYTHON" -u ce.py "$E5_DIR"
+  step "cross-encoder: run b";          BER_CE_RUN=b "$CE_PYTHON" -u ce.py "$E5_DIR"
+  step "cross-encoder: blend a+b";      BER_CE_RUNS=",b" python -u ce_blend.py )
 
-# ---- final ensemble + decision -> output/
+# ---- final ensemble + decision -> output/   (public LB 0.984083)
 # per-country odds: US/India x0.35 (decoy-density simulation), France x0.6 (leaderboard:
 # France x0.2 / 0.35 / 0.6 scored 0.983818 / 0.984006 / 0.984083)
 MEMBERS="model_fix_v4bh model_fix_aw3 model_fix_w1h model_fix_v4b model_fix_v4"
 ODDS="${ODDS:-US:0.35,India:0.35,France:0.6,*:0.35}"
-step "ensemble ($MEMBERS, cross-encoder c, odds $ODDS)"
-BER_SKIP_LOCAL=1 BER_CE=v4bhc BER_ODDS="$ODDS" python -u ensemble.py output $MEMBERS
+step "ensemble ($MEMBERS, cross-encoder a+b, odds $ODDS)"
+BER_SKIP_LOCAL=1 BER_CE=v4bh_ab BER_ODDS="$ODDS" python -u ensemble.py output $MEMBERS
 step done

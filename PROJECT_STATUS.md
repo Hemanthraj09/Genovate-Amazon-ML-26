@@ -1,7 +1,7 @@
 # Genovate: Amazon ML Challenge 2026, project status
 
 **Team:** Hemanth Raj, Kushal K V, Ayush Khanuja
-**Status as of:** 27 Sep 2026, ~21:15 IST. **Best LB 0.984083** (`output_fr06`). **The new final `output_final_c` (stronger cross-encoder) and `Genovate_submission.zip` built from it are validated**; upload `uploads/matching_results_final_c.tsv.gz` next (§7). Nothing is running.
+**Status as of:** 27 Sep 2026, ~21:25 IST. **FINAL: public LB 0.984083** (`output_fr06`, now copied to `output/`). Out of uploads. `Genovate_submission.zip` is built from the uploaded file (byte-identical, validator PASS); it only needs to be submitted (§8).
 **Deadline:** 27 Sep 2026, 23:59 IST. Final upload target: ~20:00 IST. Documentation and zip frozen by ~21:00.
 **Uploads:** 5 per day; the leaderboard keeps each team's **maximum** score. Today: **3 used, 2 left**.
 **Best public leaderboard score:** **0.980005** (v4 + v4b ensemble, odds × 0.35; `output_ens_o035/`). The top 60 teams are at ≥ 0.99.
