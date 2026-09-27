@@ -1,7 +1,7 @@
 # Genovate: Amazon ML Challenge 2026, project status
 
 **Team:** Hemanth Raj, Kushal K V, Ayush Khanuja
-**Status as of:** 27 Sep 2026, ~14:20 IST. Builds are running (§7).
+**Status as of:** 27 Sep 2026, ~15:30 IST. Builds are running (§7). Code is committed and pushed to GitHub (§9).
 **Deadline:** 27 Sep 2026, 23:59 IST. Final upload target: ~20:00 IST. Documentation and zip frozen by ~21:00.
 **Uploads:** 5 per day; the leaderboard keeps each team's **maximum** score. Today: **3 used, 2 left**.
 **Best public leaderboard score:** **0.980005** (v4 + v4b ensemble, odds × 0.35; `output_ens_o035/`). The top 60 teams are at ≥ 0.99.
@@ -29,7 +29,8 @@ Scoring is **macro F0.5**, computed per S1 entity and then averaged; it weights 
 | Final model MIT/Apache-2.0, at most 8B parameters | ✅ LightGBM (MIT). *If* the cross-encoder is used: multilingual-e5-small (MIT, 118M parameters) |
 | Pseudo-labeling (learning from our own test predictions) | ⏸ Not used; still waiting on the organizers |
 | Final zip: `output/`, `code/business_entity_resolution/{src,README.md,requirements.txt}`, `Documentation_template.md` | ⏳ Documentation drafted (repo root); README, `run_final.sh` and the zip are still to do (§8) |
-| Don't publish code during the challenge | ✅ Nothing pushed. The GitHub repo is public, so push only after the deadline |
+| Publishing code | No rule in `context/` forbids it (checked the guidelines PDF, the Unstop instructions and the deep-dive transcript). The team chose to push on 27 Sep; the commit history also documents authorship |
+| Keep version history of all submissions | ✅ `submissions/SUBMISSIONS.md` lists every upload with its commit; the files are archived locally in `submissions/` (TSVs are git-ignored because of size) |
 
 ---
 
@@ -123,13 +124,23 @@ The France-empty probe splits the leaderboard into **US+India ≈ 0.982** and **
 
 ---
 
-## 7. Running now (27 Sep, ~14:20)
+## 7. Running now (27 Sep, ~15:30)
+
+**Honest local results so far** (stage 2, expected-F rule, held-out entity halves):
+
+| Model set | World | Local F0.5 |
+|---|---|---|
+| v4bh | original world, honest OOF | 0.98634 |
+| w1h | world 1, honest OOF | 0.98645 |
+| **aw3** | **anchored world 3** (only decoys that imitate kept entities) | **0.98785** |
+
+Stage 1 alone for aw3 scored 0.98354. Each world has a different decoy mix, so the scores are indicative rather than directly comparable.
 
 | Resource | Job | ETA |
 |---|---|---|
-| CPU | **aw3** anchored world: features → stage 1 → stage 2 → predict (`work/aw3_build.log`) | ~16:20 |
-| CPU (then) | honest v4 (`run_honest.sh v4`), then stage-2 variants `v4bh_a`, `w1h_a` (`run_s2var.sh`) | ~17:45 |
-| GPU | cross-encoder on v4bh's uncertain pairs (`ce.py`); starts automatically once aw3 stage 1 runs and RAM allows | ~16:00 |
+| CPU | aw3: test prediction (`work/aw3_build.log`) | ~15:35 |
+| GPU | cross-encoder on v4bh's uncertain pairs (`ce.py`). It starts automatically once aw3 finishes, because the two can't share 16 GB. Its first three attempts ran out of memory next to the CPU jobs | ~16:40 |
+| deferred | honest v4 and the stage-2 variants. Paused with `work/SKIP_v4` and `work/SKIP_s2var`; delete a file to re-enable that step | if time allows |
 
 Ready but not uploaded:
 
@@ -150,13 +161,35 @@ Ready but not uploaded:
 | 5 | Final: the broadest ensemble of the strong model sets (leaked v4/v4b, honest v4bh/w1h/v4h and variants, aw3 if it proves out), with the cross-encoder blend if it helps on held-out entities, at × 0.35 | ~19:30 |
 
 **Deliverables (must finish by ~21:00):**
-1. `run_final.sh`: one script that regenerates the exact final upload (all builds plus the ensemble, with their environment variables).
-2. README rewrite: variant `fix`, 4 folds, 56 features, GPU optional, run time.
-3. Fill in the results in `Documentation_template.md` (drafted at the repo root).
-4. `requirements.txt`: add torch/transformers if the cross-encoder is used.
-5. Build `Genovate_submission.zip`, re-run the validator on its contents, and check the upload size limit (`candidate_pairs.tsv` is ~409 MB).
-6. Don't push to GitHub before the deadline.
 
-## 9. How to run
+| # | Item | Status |
+|---|---|---|
+| 1 | `run_final.sh`: regenerates the final upload (shared prep, each member build with its exact settings, the ensemble) | Drafted; the member list is set once #5 is chosen |
+| 2 | README rewrite: variant `fix`, 4 folds, 56 features, GPU optional, run time | To do (~17:00) |
+| 3 | `Documentation_template.md` (repo root) | Drafted; fill in the final results |
+| 4 | `requirements.txt`: add torch/transformers if the cross-encoder is used | To do |
+| 5 | **`make_submission_zip.py <output folder>`** builds `Genovate_submission.zip` in the required layout (`output/`, `code/business_entity_resolution/{src,README.md,requirements.txt}`, `Documentation_template.md`) and runs the organizer's validator on the zipped files | **Ready and tested** on `output_ens_o035`: 43 files, 205.6 MB, validator PASS |
+| 6 | Check the zip upload size limit on the portal (205.6 MB) | **Team: please check** |
+
+**End-of-day steps (about 10 minutes once the final output exists):**
+1. `python make_submission_zip.py <final output folder>` and confirm PASS.
+2. Upload `<final output folder>/matching_results.tsv` to the leaderboard.
+3. Submit `Genovate_submission.zip`.
+4. Log the upload in `submissions/SUBMISSIONS.md`, then commit and push.
+
+## 9. Git history of 27 Sep (pushed to `origin/main`)
+
+| Commit | What |
+|---|---|
+| `1518d1f` | Ignore experiment output folders and TSVs |
+| `1a66ced` | Test-shaped validation worlds (`fix`, `BER_WORLD`, `BER_DECOYS=anchored`), compact-name key, core-address features, build scripts |
+| `6b42ea7` | **OOF leak fix** (fold k scored by model k), `BER_LEGACY_OOF` for regenerating v4/v4b, honest-rebuild and stage-2 variant scripts, `.sh` kept LF |
+| `9853337` | Decision layer: missing-match term, `BER_ODDS`, ensembling (`ensemble.py`), stacking, unseen-country rule |
+| `9798207` | Optional GPU cross-encoder (`ce.py`, `ce_blend.py`) |
+| `8c2bd97` | Status, methodology draft, `feedback6.md`, `run_final.sh` draft |
+| `3fb66e0` | Submission log for every upload through 13:35 |
+| (this commit) | `make_submission_zip.py`, status update |
+
+## 10. How to run
 
 See [code/business_entity_resolution/README.md](code/business_entity_resolution/README.md) (being rewritten). Short form: `pip install -r requirements.txt`; `cd src`; `export BER_VARIANT=fix`; then run the builds and the final ensemble as in `run_final.sh` (to be added). Validate with the organizer's script using `--check-ids`.
