@@ -19,7 +19,6 @@
 #               best S1 per record, exact expected-F0.5 set per S1 entity
 set -euo pipefail
 export BER_VARIANT=fix PYTHONWARNINGS=ignore PYTHONIOENCODING=utf-8
-ODDS="${ODDS:-0.35}"
 CE_PYTHON="${CE_PYTHON:-python}"
 E5_DIR="${E5_DIR:?set E5_DIR to the folder with intfloat/multilingual-e5-small}"
 R="$(cd ../../.. && pwd)"
@@ -65,15 +64,19 @@ build v4bh   0     ""        1337  383    0.06  0.7  0           v4b
 build w1h    1     ""        2028  383    0.06  0.7  0
 build aw3    3     anchored  3033  383    0.06  0.7  0
 
-# ---- cross-encoder on v4bh's uncertain pairs (GPU), two seeds, then the blend
+# ---- cross-encoder on v4bh's uncertain pairs (GPU): run c = all ~690k training
+#      pairs per entity half (held-out F0.5 0.98634 -> 0.98932), then its blend
 ( export BER_MODEL_TAG=v4bh
   step "cross-encoder: prepare pairs";  python -u ce.py prep
-  step "cross-encoder: run a";          "$CE_PYTHON" -u ce.py "$E5_DIR"
-  step "cross-encoder: run b";          BER_CE_RUN=b "$CE_PYTHON" -u ce.py "$E5_DIR"
-  step "cross-encoder: blend";          BER_CE_RUNS=",b" python -u ce_blend.py )
+  step "cross-encoder: run c";          BER_CE_RUN=c BER_CE_MAX_TRAIN=700000 "$CE_PYTHON" -u ce.py "$E5_DIR"
+  step "cross-encoder: blend";          BER_CE_RUNS=c python -u ce_blend.py
+  cp "$W/ce/blend_v4bh.json" "$W/ce/blend_v4bhc.json" )   # single-run blends are saved under the base tag
 
 # ---- final ensemble + decision -> output/
+# per-country odds: US/India x0.35 (decoy-density simulation), France x0.6 (leaderboard:
+# France x0.2 / 0.35 / 0.6 scored 0.983818 / 0.984006 / 0.984083)
 MEMBERS="model_fix_v4bh model_fix_aw3 model_fix_w1h model_fix_v4b model_fix_v4"
-step "ensemble ($MEMBERS, cross-encoder, odds x$ODDS)"
-BER_SKIP_LOCAL=1 BER_CE=v4bh_ab BER_ODDS=$ODDS python -u ensemble.py output $MEMBERS
+ODDS="${ODDS:-US:0.35,India:0.35,France:0.6,*:0.35}"
+step "ensemble ($MEMBERS, cross-encoder c, odds $ODDS)"
+BER_SKIP_LOCAL=1 BER_CE=v4bhc BER_ODDS="$ODDS" python -u ensemble.py output $MEMBERS
 step done

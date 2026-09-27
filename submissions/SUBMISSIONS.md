@@ -26,3 +26,4 @@ The uploaded file for each version is kept locally as `submissions/vNN/matching_
 | France x0.6 | 27 Sep | eae4f3c | as final, France odds 0.6 | — | **0.984083** | output_fr06 (best so far) |
 | France x1.0 | 27 Sep | eae4f3c | as final, France odds 1.0 | — | pending | uploads/matching_results_fr10.tsv.gz |
 | US/India x0.5 | 27 Sep | eae4f3c | US/India odds 0.5, France 0.6 | — | pending | uploads/matching_results_ui05.tsv.gz |
+| final_c | 27 Sep | (this commit) | cross-encoder run c (all ~690k pairs per half; held-out 0.98932), US/India x0.35, France x0.6 | 0.98932 honest (v4bh+CE c) | pending | uploads/matching_results_final_c.tsv.gz, submissions/final_c_candidate; **Genovate_submission.zip built from it (validated)** |

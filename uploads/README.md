@@ -6,6 +6,7 @@ rename the result to `matching_results.tsv` if the portal asks for that name, an
 
 | File | What | Compare against |
 |---|---|---|
+| **`matching_results_final_c.tsv.gz`** | **Upload this first.** Final recipe with the stronger cross-encoder (run c, all training pairs: held-out +0.0030 vs +0.0026), US/India x0.35, France x0.6 | best so far 0.984083 |
 | `matching_results_fr10.tsv.gz` | final recipe, France odds x1.0 (US/India x0.35) | best so far 0.984083 (France x0.6) |
 | `matching_results_ui05.tsv.gz` | final recipe, US/India odds x0.5 (France x0.6) | 0.984083 |
 
