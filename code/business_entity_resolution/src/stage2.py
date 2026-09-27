@@ -20,6 +20,7 @@ The same code stacks further: level L builds its context from level L-1
 probabilities (level 1 = train.py). Outputs per level L >= 2:
 model/s{L}_fold{k}.txt, model/oof{L}.parquet, model/test_pred{L}.parquet
 """
+import os
 import time
 import numpy as np
 import polars as pl
@@ -126,6 +127,11 @@ def context(pairs, split="train"):
         pl.col("p").rank("ordinal", descending=True).over("s1").clip(upper_bound=8).alias("s_prank"))
     import blocking as B
     s1n, qn = B.load_norm(split)
+    # restrict to the records actually in play, so the "common token" document
+    # frequencies in _core_strings are measured on the same population on both
+    # sides (the corrected train variant subsamples decoy queries)
+    s1n = s1n.filter(pl.col("idx").is_in(pairs["s1"].unique().implode()))
+    qn = qn.filter(pl.col("qid").is_in(pairs["qid"].unique().implode()))
     x = x.join(sibling_features(pairs, s1n, qn), on=["qid", "s1"], how="left")
     x = x.join(core_features(pairs, s1n, qn), on=["qid", "s1"], how="left")
     del s1n, qn
@@ -144,7 +150,11 @@ def _name(kind, level):
     return kind + ("" if level == 1 else str(level))
 
 
-def fit_predict_oof(frac=TR.TRAIN_FRAC, level=2):
+def fit_predict_oof(frac=None, level=2):
+    # stage 2 early-stops around 100 iterations, so it is not data-hungry; it gets
+    # its own (smaller) share so stage 1 can take more without the 82-column design
+    # matrix blowing the memory budget
+    frac = float(os.environ.get("BER_S2_FRAC", TR.TRAIN_FRAC)) if frac is None else frac
     """Train level-L fold models on OOF context from level L-1; return OOF probs."""
     t0 = time.time()
     oof = pl.read_parquet(C.work(C.MODEL_DIR, _name("oof", level - 1) + ".parquet"))
@@ -152,28 +162,39 @@ def fit_predict_oof(frac=TR.TRAIN_FRAC, level=2):
     feats = TR.feature_names() + S2_EXTRA
     lab = TR.add_folds(oof.select("qid", "s1").lazy()).select("qid", "s1", "y", "fold", "u").collect()
     ctx = ctx.join(lab, on=["qid", "s1"])
-    models, outs = [], []
+    models = []
     del oof
     for k in range(TR.NFOLD):
-        # stream the chunk files so the full design matrix never sits in memory
-        tr = pl.concat([d.filter((pl.col("fold") != k) & (pl.col("u") < frac))
-                        for d in _design("train", ctx, feats)])
-        va = pl.concat([d.filter((pl.col("fold") == k) & (pl.col("u") < 0.05))
-                        for d in _design("train", ctx, feats)])
-        print(f"stage2 fold {k}: train {tr.height:,} ({time.time() - t0:.0f}s)", flush=True)
-        dtr = lgb.Dataset(tr.select(feats).to_numpy(), tr["y"].to_numpy(), feature_name=feats)
-        dva = lgb.Dataset(va.select(feats).to_numpy(), va["y"].to_numpy(), reference=dtr)
-        del tr
+        # one pass over the chunk files per fold; the full design never sits in memory.
+        # The early-stopping rows come from the TRAINING folds, not from fold k.
+        other = pl.col("fold") != k
+        tr_p, va_p = [], []
+        for d in _design("train", ctx, feats):
+            tr_p.append(d.filter(other & (pl.col("u") < frac)))
+            va_p.append(d.filter(other & (pl.col("u") >= 1 - TR.VAL_FRAC)))
+        tr, va = pl.concat(tr_p), pl.concat(va_p)
+        del tr_p, va_p
+        print(f"stage2 fold {k}: train {tr.height:,} valid {va.height:,} ({time.time() - t0:.0f}s)", flush=True)
+        dtr = lgb.Dataset(TR.design(tr, feats), tr["y"].to_numpy(), feature_name=feats)
+        dva = lgb.Dataset(TR.design(va, feats), va["y"].to_numpy(), reference=dtr)
+        del tr, va
         m = lgb.train(TR.PARAMS, dtr, TR.ROUNDS, valid_sets=[dva],
                       callbacks=[lgb.log_evaluation(200), lgb.early_stopping(50, verbose=False)])
         m.save_model(str(C.work(C.MODEL_DIR, f"s{level}_fold{k}.txt")))
         del dtr, dva
-        for d in _design("train", ctx, feats):
-            te = d.filter(pl.col("fold") == k)
-            p = m.predict(te.select(feats).to_numpy(), num_threads=C.N_THREADS)
-            outs.append(te.select("qid", "s1", "y").with_columns(pl.Series("p", p.astype(np.float32))))
         models.append(m)
         print(f"stage2 fold {k}: best iter {m.best_iteration} ({time.time() - t0:.0f}s)", flush=True)
+    # OOF: each pair is scored by the one model that never trained on its fold
+    # (model k trains on folds != k); see train.predict_oof for the leak this fixed
+    outs = []
+    for d in _design("train", ctx, feats):
+        X = TR.design(d, feats)
+        fold = d["fold"].to_numpy()
+        P = np.stack([m.predict(X, num_threads=C.N_THREADS) for m in models])
+        own = P[fold, np.arange(len(fold))]
+        p = (P.sum(0) - own) / (TR.NFOLD - 1) if TR.LEGACY_OOF else own
+        outs.append(d.select("qid", "s1", "y").with_columns(pl.Series("p", p.astype(np.float32))))
+        del X, P
     oof2 = pl.concat(outs)
     oof2.write_parquet(C.work(C.MODEL_DIR, _name("oof", level) + ".parquet"))
     return models, oof2
@@ -187,7 +208,7 @@ def predict_test(level=2):
     feats = TR.feature_names("test") + S2_EXTRA
     outs = []
     for part in _design("test", ctx, feats):
-        X = part.select(feats).to_numpy()
+        X = TR.design(part, feats)
         p = np.mean([m.predict(X, num_threads=C.N_THREADS) for m in models], axis=0)
         outs.append(part.select("qid", "s1").with_columns(pl.Series("p", p.astype(np.float32))))
     out = pl.concat(outs)
