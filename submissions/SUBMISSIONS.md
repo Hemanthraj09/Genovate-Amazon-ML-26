@@ -19,3 +19,10 @@ The uploaded file for each version is kept locally as `submissions/vNN/matching_
 | ens v4+v4b o0.5 | 27 Sep 12:15 | 9853337 | + v4b (seed 1337, 383 leaves), odds x0.5 (test decoy density) | 0.99029 leaked | 0.979992 | submissions/ens_o50_uploaded |
 | ens v4+v4b o0.35 | 27 Sep 12:19 | 9853337 | same, odds x0.35 | — | **0.980005** | submissions/ens_o035_uploaded (best) |
 | v4bh o0.35 | 27 Sep ~13:35 | 6b42ea7 | honest OOF (leak fixed), stage 2 retrained; single model | 0.98634 honest | 0.979403 | submissions/v4bh_o035_uploaded |
+| ens5 o0.3 | 27 Sep | 161e809 | 5 model sets (v4bh, aw3, w1h, v4b, v4), odds x0.3, no cross-encoder | aw3 0.98785 honest | 0.98092 | output_ens5_o030 |
+| ens5 + CE(a) o0.35 | 27 Sep | 161e809 | + e5-small cross-encoder blend on uncertain pairs | 0.98892 honest (v4bh+CE) | 0.983899 | output_ens5ce_o035 |
+| final (ens5 + CE a+b) o0.35 | 27 Sep | eae4f3c | two cross-encoder runs averaged | 0.98899 honest | 0.984006 | output_final, submissions/final_candidate |
+| France x0.2 | 27 Sep | eae4f3c | as final, France odds 0.2 | — | 0.983818 | output_fr02 |
+| France x0.6 | 27 Sep | eae4f3c | as final, France odds 0.6 | — | **0.984083** | output_fr06 (best so far) |
+| France x1.0 | 27 Sep | eae4f3c | as final, France odds 1.0 | — | pending | uploads/matching_results_fr10.tsv.gz |
+| US/India x0.5 | 27 Sep | eae4f3c | US/India odds 0.5, France 0.6 | — | pending | uploads/matching_results_ui05.tsv.gz |
